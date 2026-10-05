@@ -4,6 +4,7 @@ Search agent: run the legacy job search, then import what it found.
     python -m jobpilot.agents.search                      # full legacy search + import
     python -m jobpilot.agents.search --import-only        # just import legacy jobs.db
     python -m jobpilot.agents.search --keywords "AI Business Analyst" --sources naukri
+    python -m jobpilot.agents.search --then-score         # scheduled task: search, then score
 
 agent_runs.found = new jobs, processed = legacy rows seen.
 """
@@ -77,11 +78,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--import-only", action="store_true", help="Skip the browser search; import legacy jobs.db only")
     parser.add_argument("--keywords", nargs="+", help="Override the legacy search keywords for this run")
     parser.add_argument("--sources", nargs="+", help="Override the legacy sources for this run (naukri, linkedin)")
+    parser.add_argument("--then-score", action="store_true", help="Run the score agent afterwards (even if search failed)")
     args = parser.parse_args(argv)
+    failed = False
     try:
         run(args.import_only, args.keywords, args.sources)
     except Exception:
-        sys.exit(1)  # already recorded in agent_runs and printed
+        failed = True  # already recorded in agent_runs and printed
+    if args.then_score:
+        from jobpilot.agents import score
+
+        try:
+            score.run()
+        except Exception:
+            failed = True
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

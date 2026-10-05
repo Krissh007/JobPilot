@@ -7,8 +7,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 | 0 Design | ✅ approved | Wrap `E:\job_search_agent`; separate `jobpilot.db`; JobPilot owns apply + scheduling |
 | 1 DB + migrations + seed | ✅ done | See below |
 | 2 Search integration | ✅ done | See below |
-| 3 Scorer | ⏳ next | Needs the master resume `.docx` path |
-| 4 FastAPI + pytest | — | |
+| 3 Scorer | ✅ done (mocked) | Real run needs `GEMINI_API_KEY` + `GEMINI_MODEL` in `.env` |
+| 4 FastAPI + pytest | ⏳ next | |
 | 5 Dashboard UI | — | 2 visual directions first |
 | 6 Docs generator | — | Reuses legacy `src/tailoring` |
 | 7 Auto-apply + review queue | — | LinkedIn, then Naukri (pre-check → approve → apply) |
@@ -41,3 +41,19 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 - Real import: 179 legacy rows → 138 new, 1 merged (same job under two URLs), 40 skipped as legacy-rejected. Running it again adds 0 new.
 - Real browser search (one keyword, Naukri + LinkedIn, about 5 min): legacy discovered 120 → 13 matched → JobPilot imported 12 new (1 was already present). Exit 0, agent_run #6 ok.
 - Tests: 25 passed. They cover IST conversion, status map, Excel fallback, read-only DB, idempotent import that keeps JobPilot status, run recorder ok/error, and the import-only end-to-end run.
+
+## Phase 3: scorer (2026-10-06)
+- Resume: the legacy `config/master_resume.md` (your choice for now). Override it with `RESUME_PATH`. `resume_version` is a sha256 of the resume content (first 12 hex chars).
+- `jobpilot/llm/`:
+  - Token bucket (`GEMINI_RPM`).
+  - stdlib REST client: 429/5xx backoff with jitter that honours `retryDelay`. "Thought" parts are dropped.
+  - Errors: `QuotaExhausted` (still 429 after retries) and `LLMConfigError` (missing key or model, HTTP 400/401/403/404).
+  - Cache in `llm_cache`, keyed by sha256(prompt version + JD + resume version).
+- `jobpilot/agents/score.py`:
+  - Pydantic `ScoreResult` (score/skills/experience/domain 0-100, reason, matched/missing skills), with one retry that spells out the validation error.
+  - Commits one job at a time. Auto-moves found → shortlisted (actor = agent).
+  - Picks the best legacy score first. Skips jobs with a JD under 150 characters, and examples.
+- `search --then-score` runs search and then score, for the scheduler.
+- Bug found by the real run: a missing key was counted per job as "bad output" and the run ended `ok`. Config errors now stop the run as `error` (run #8).
+- Real queue: 150 unscored real jobs, 149 of them with a usable JD.
+- Tests: 41 passed, with Gemini mocked: client fake + HTTP opener fake, backoff timing, cache hit, resume change, quota stop, config stop.

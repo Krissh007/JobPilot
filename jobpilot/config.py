@@ -21,6 +21,8 @@ class Config(BaseSettings):
     database_url: str = f"sqlite:///{(DATA_DIR / 'jobpilot.db').as_posix()}"
     legacy_agent_dir: Path = Path(r"E:\job_search_agent")
     legacy_python: str = "python"
+    # Defaults to the legacy agent's config/master_resume.md
+    resume_path: str = ""
 
 
 @lru_cache
