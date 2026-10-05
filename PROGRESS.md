@@ -7,8 +7,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 | 0 Design | ✅ approved | Wrap `E:\job_search_agent`; separate `jobpilot.db`; JobPilot owns apply + scheduling |
 | 1 DB + migrations + seed | ✅ done | See below |
 | 2 Search integration | ✅ done | See below |
-| 3 Scorer | ✅ done (mocked) | Real run needs `GEMINI_API_KEY` + `GEMINI_MODEL` in `.env` |
-| 4 FastAPI + pytest | ⏳ next | |
+| 3 Scorer | 🔒 blocked: real run pending | Built and tested with Gemini mocked. Needs `GEMINI_API_KEY` + `GEMINI_MODEL` in `.env`, then a real scoring run |
+| 4 FastAPI + pytest | waits for Phase 3 | |
 | 5 Dashboard UI | — | 2 visual directions first |
 | 6 Docs generator | — | Reuses legacy `src/tailoring` |
 | 7 Auto-apply + review queue | — | LinkedIn, then Naukri (pre-check → approve → apply) |
