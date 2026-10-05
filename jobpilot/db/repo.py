@@ -15,11 +15,16 @@ REFRESHABLE = ("title", "company", "source", "location", "exp_min", "exp_max", "
 KEYS_SET_HERE = ("id", "status", "url", "url_canonical", "dedupe_hash")
 
 
-def find_duplicate(session: Session, url: str, company: str, title: str, location: str) -> Job | None:
+def find_duplicate(session: Session, url: str, company: str, title: str, location: str, source: str = "") -> Job | None:
     canon = canonical_url(url)
     job = session.exec(select(Job).where(Job.url_canonical == canon)).first()
     if job is None:
-        job = session.exec(select(Job).where(Job.dedupe_hash == dedupe_hash(company, title, location))).first()
+        # The company+title+city fallback only catches the same opening on a
+        # different portal. Within one portal a different job id is a different
+        # opening (e.g. Accenture lists many "Business Analyst, Hyderabad" reqs).
+        job = session.exec(
+            select(Job).where(Job.dedupe_hash == dedupe_hash(company, title, location), Job.source != source)
+        ).first()
     return job
 
 
@@ -27,7 +32,7 @@ def upsert_job(session: Session, data: dict[str, Any], actor: Actor = Actor.agen
     """Insert or refresh a job by dedupe key. Returns (job, created)."""
     url = str(data["url"]).strip()
     title, company, location = data.get("title", ""), data.get("company", ""), data.get("location", "")
-    job = find_duplicate(session, url, company, title, location)
+    job = find_duplicate(session, url, company, title, location, str(data.get("source") or ""))
 
     if job is not None:
         for name in REFRESHABLE:

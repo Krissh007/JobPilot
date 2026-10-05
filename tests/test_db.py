@@ -69,12 +69,19 @@ def test_upsert_dedupes_by_canonical_url_and_keeps_user_fields(session):
     assert count(session, Job) == 1
 
 
-def test_upsert_falls_back_to_company_title_location_hash(session):
+def test_upsert_falls_back_to_hash_across_portals(session):
     upsert_job(session, job_data())
-    _, created = upsert_job(session, job_data(url="https://www.naukri.com/job-listings-x-150926500123",
+    _, created = upsert_job(session, job_data(url="https://www.naukri.com/job-listings-x-150926500123", source="naukri",
                                               company="ACME Pvt Ltd", location="Hyderabad, Telangana"))
     session.commit()
     assert not created and count(session, Job) == 1
+
+
+def test_same_portal_different_job_ids_stay_separate(session):
+    upsert_job(session, job_data(url="https://www.naukri.com/job-listings-ba-150926500001", source="naukri"))
+    _, created = upsert_job(session, job_data(url="https://www.naukri.com/job-listings-ba-150926500002", source="naukri"))
+    session.commit()
+    assert created and count(session, Job) == 2
 
 
 def test_set_status_records_history_and_applied_at(session):
