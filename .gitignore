@@ -1,0 +1,23 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local caches kept off C: (pip, npm, Playwright browsers)
+.cache/
+
+# Runtime data: database, screenshots, logs, generated documents
+data/
+output/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
