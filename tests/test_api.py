@@ -228,8 +228,8 @@ def test_start_run_builds_whitelisted_command(client, monkeypatch):
 
     busy = client.post("/api/runs/score")
     assert busy.status_code == 409 and busy.json()["detail"]["run_id"] == run_id
-    assert client.post("/api/runs/search", json={"import_only": True, "then_score": True}).status_code == 202
-    assert FakePopen.started[1][-2:] == ["--import-only", "--then-score"]
+    assert client.post("/api/runs/search", json={"import_legacy_db": True, "then_score": True}).status_code == 202
+    assert FakePopen.started[1][-2:] == ["--import-legacy-db", "--then-score"]
     assert client.post("/api/runs/apply").status_code == 501
     assert client.post("/api/runs/score", json={"limit": 9999}).status_code == 422
 
@@ -266,7 +266,7 @@ def test_real_subprocess_run_streams_to_completion(client, db_url, tmp_path, mon
     """End to end: POST starts a real agent process; the SSE stream follows it until it finishes."""
     legacy = make_legacy(tmp_path)
     monkeypatch.setenv("LEGACY_AGENT_DIR", str(legacy))
-    run_id = client.post("/api/runs/search", json={"import_only": True}).json()["id"]
+    run_id = client.post("/api/runs/search", json={"import_legacy_db": True}).json()["id"]
 
     events = sse_events(client.get(f"/api/runs/{run_id}/stream").text)
     assert events[-1] == ("end", {"status": "ok", "error": ""})

@@ -36,7 +36,7 @@ LOG_DIR = ROOT / "data" / "logs"
 
 class RunOptions(BaseModel):
     """Whitelisted options only; nothing from the request reaches a shell."""
-    import_only: bool = False      # search
+    import_legacy_db: bool = False  # search: copy from the old legacy jobs.db instead of searching
     then_score: bool = False       # search
     limit: Optional[int] = Field(None, ge=1, le=500)  # score
     job_id: Optional[int] = Field(None, ge=1)          # score
@@ -45,7 +45,7 @@ class RunOptions(BaseModel):
 def build_command(agent: AgentName, run_id: int, options: RunOptions) -> list[str]:
     command = [sys.executable, "-m", f"jobpilot.agents.{agent.value}", "--run-id", str(run_id)]
     if agent == AgentName.search:
-        command += ["--import-only"] * options.import_only + ["--then-score"] * options.then_score
+        command += ["--import-legacy-db"] * options.import_legacy_db + ["--then-score"] * options.then_score
     elif agent == AgentName.score:
         if options.limit:
             command += ["--limit", str(options.limit)]

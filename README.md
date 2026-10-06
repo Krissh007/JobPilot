@@ -21,20 +21,25 @@ copy .env.example .env                            # then add GEMINI_API_KEY and 
 
 ## Search agent
 
-The search agent runs the legacy agent's own discovery pipeline from `E:\job_search_agent` (using the legacy
-agent's Python). For that run only, its tailoring and form preparation are turned off. JobPilot then
-imports the legacy `data\jobs.db` **read-only**. If that database is unavailable, it imports the newest
-`new_leads_*.xlsx` export instead.
+**There is one database: `data\jobpilot.db`.** The search agent runs two stages of the legacy agent's code
+from `E:\job_search_agent`, unchanged and with the legacy agent's own Python:
+- **Browser discovery:** it skips URLs JobPilot already has.
+- **Rule-based matching:** the legacy quality gates apply here.
+
+The matched jobs stream straight into `jobpilot.db`. The legacy save, tailor, export and sync stages are not
+called, so the legacy `jobs.db`, its Excel exports and `project_sync` files are never written. The old
+`jobs.db` is kept as an archive and was imported once.
 
 ```powershell
-.\.venv\Scripts\python -m jobpilot.agents.search                    # full search + import (opens a browser)
-.\.venv\Scripts\python -m jobpilot.agents.search --import-only      # import only
+.\.venv\Scripts\python -m jobpilot.agents.search                    # browser search, saved into jobpilot.db
+.\.venv\Scripts\python -m jobpilot.agents.search --then-score       # search, then Gemini scoring
 .\.venv\Scripts\python -m jobpilot.agents.search --keywords "AI Business Analyst" --sources naukri
+.\.venv\Scripts\python -m jobpilot.agents.search --import-legacy-db # one-off: copy from the old jobs.db archive (read-only)
 ```
 
-Legacy statuses are mapped only when a job is first imported: new/review → found, shortlisted,
-applied, interviewing → interview, offer, skipped → rejected. Rows the legacy gates rejected are not imported.
-After that first import, JobPilot owns the stage. Paths come from `LEGACY_AGENT_DIR` and `LEGACY_PYTHON` in `.env`.
+When jobs are copied from the old archive, statuses are mapped once: new/review → found, shortlisted,
+applied, interviewing → interview, offer, skipped → rejected. Rows the legacy gates rejected are skipped.
+Paths come from `LEGACY_AGENT_DIR` and `LEGACY_PYTHON` in `.env`.
 
 Searching LinkedIn or Naukri with automation may break their user agreements. The legacy agent paces
 its requests. Keep runs infrequent.

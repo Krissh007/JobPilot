@@ -90,3 +90,18 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - Real-only funnel: 150 → 50 → 5 → 5. Export: 165 rows.
   - Runs #17 (score) and #18 (search import) were started through the API and streamed to `end: ok`. A double start returned 409. Apply returns 501 until Phase 7.
 - Tests: 60 passed, including a real subprocess run streamed end to end, a crashed process marked error, and the remote-client 403.
+
+## One database (2026-10-06, your request)
+- `jobpilot.db` is now the only database the pipeline writes. The shim calls the legacy `discover_jobs` and `score_jobs` (legacy matching and gates) directly, and streams matches as `JOBPILOT_JOB {json}` lines. The legacy save, tailor, prepare, export and project_sync stages are no longer called.
+- JobPilot passes the URLs it already has, so known jobs are skipped during discovery. Legacy debug page dumps go to `E:\JobPilot\data\debug`.
+- The old legacy `jobs.db` is a read-only archive. It was imported once in Phase 2, and `--import-legacy-db` can copy from it again.
+- Real run, "AI Product Analyst", Naukri + LinkedIn:
+  - 165 known URLs skipped. Discovered 77 → 7 stale → 65 rejected by the legacy gates → 5 matched.
+  - Result: 4 new jobs plus 1 cross-portal duplicate.
+  - The legacy project's `jobs.db` (md5), exports, `project_sync` and logs are byte-identical before and after.
+  - Scored right after (run #21): Techdome 90, LPL Data Product Analyst 85 and Wise 75 shortlisted; Infosys 35.
+- Also on your request: the old exposed key file `E:\job_search_agent\.env.txt` was moved to the Recycle Bin. JobPilot's `.env` stays.
+- Tests: 61 passed. A new test drives the stdout protocol through a fake shim and checks that nothing is written into the legacy folder.
+
+## Phase 5: dashboard UI (in progress)
+- Two static visual directions: `design/direction-a-flight-deck.html` and `design/direction-b-ledger.html`, with light and dark PNGs. Waiting for your pick.

@@ -117,12 +117,57 @@ def test_agent_run_records_ok_and_error(db_url):
     assert failed.status == RunStatus.error and "quota exhausted" in failed.error
 
 
-def test_search_import_only_end_to_end(tmp_path, db_url, monkeypatch):
+def test_search_import_legacy_db_end_to_end(tmp_path, db_url, monkeypatch):
     root = make_legacy(tmp_path)
     monkeypatch.setattr(search, "get_config", lambda: SimpleNamespace(legacy_agent_dir=root, legacy_python="python"))
     monkeypatch.setattr(search, "run_legacy_search", lambda *a: pytest.fail("browser search must be skipped"))
-    search.run(import_only=True, db_url=db_url)
+    search.run(import_legacy_db=True, db_url=db_url)
     with Session(get_engine(db_url)) as s:
         run = s.exec(select(AgentRun)).one()
     assert run.status == RunStatus.ok and (run.found, run.processed) == (3, 4)
     assert "3 new, 0 updated, 1 skipped (legacy rejected: 1)" in run.log
+
+
+FAKE_SHIM = r"""
+import json, sys
+args = sys.argv
+known = json.load(open(args[args.index("--known-urls") + 1], encoding="utf-8"))
+print("INFO | naukri returned 2 jobs")
+jobs = [
+    {"job_url": "https://www.naukri.com/job-listings-ai-ba-zeta-150926500101", "title": "AI Business Analyst",
+     "company": "Zeta", "source": "naukri", "location": "Hyderabad", "description": "LLM requirements " * 20,
+     "match_score": 71.0, "status": "new", "experience_min": 2, "experience_max": 5},
+    {"job_url": "https://www.linkedin.com/jobs/view/4100000002/", "title": "Product Analyst", "company": "Eta",
+     "source": "linkedin", "location": "Hyderabad", "description": "Experiments", "match_score": 55.0, "status": "new"},
+]
+for job in jobs:
+    if job["job_url"] not in known:
+        print("JOBPILOT_JOB " + json.dumps(job))
+print("JOBPILOT_RESULT " + json.dumps({"discovered": 9, "stale": 3, "rejected": 4, "matched": 2}))
+"""
+
+
+def test_search_streams_matches_into_jobpilot_db_only(tmp_path, db_url, monkeypatch):
+    import sys
+    shim = tmp_path / "fake_shim.py"
+    shim.write_text(FAKE_SHIM, encoding="utf-8")
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    monkeypatch.setattr(search, "SHIM", shim)
+    monkeypatch.setattr(search, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(search, "get_config", lambda: SimpleNamespace(legacy_agent_dir=legacy, legacy_python=sys.executable))
+
+    search.run(db_url=db_url)
+    with Session(get_engine(db_url)) as s:
+        jobs = {j.company: j for j in s.exec(select(Job))}
+        run = s.exec(select(AgentRun)).one()
+    assert set(jobs) == {"Zeta", "Eta"} and jobs["Zeta"].legacy_score == 71.0 and jobs["Zeta"].exp_max == 5
+    assert jobs["Zeta"].status == JobStatus.found and len(jobs["Zeta"].jd_text) > 100
+    assert (run.found, run.processed) == (2, 2)
+    assert "[legacy] INFO | naukri returned 2 jobs" in run.log and "rejected by gates 4, matched 2" in run.log
+    assert not list(legacy.iterdir())  # nothing written into the legacy project
+
+    search.run(db_url=db_url)  # second run: JobPilot passes its URLs, so the shim skips them
+    with Session(get_engine(db_url)) as s:
+        last = s.exec(select(AgentRun).order_by(AgentRun.id.desc())).first()
+    assert (last.found, last.processed) == (0, 0) and "Running legacy discovery (2 known URLs skipped)" in last.log

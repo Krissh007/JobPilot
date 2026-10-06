@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JobPilot · Direction B</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+/* Direction B, "Ledger": dense and analytical. Graphite neutrals, one indigo accent, hairlines, numbers first. */
+:root{
+  --bg:#f7f7f8; --surface:#fff; --sunk:#f0f1f3; --fg:#18191d; --muted:#6b6f7a; --line:#e3e4e8; --line-2:#d4d6dc;
+  --accent:#4f46e5; --accent-soft:#eef0ff; --accent-ink:#fff;
+  --good:#15803d; --good-soft:#e7f6ec; --warn:#b45309; --warn-soft:#fdf2e3; --bad:#b91c1c; --violet:#7c3aed;
+  --f-body:"Inter",system-ui,sans-serif; --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+:root[data-theme="dark"]{
+  --bg:#0f1013; --surface:#16171b; --sunk:#1c1e23; --fg:#e8e9ec; --muted:#9298a3; --line:#25272d; --line-2:#30333a;
+  --accent:#8b85ff; --accent-soft:#23214a; --accent-ink:#0f0e24;
+  --good:#4ade80; --good-soft:#12291b; --warn:#f0a94a; --warn-soft:#2d2112; --bad:#f87171; --violet:#b69cff; color-scheme:dark;
+}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 var(--f-body);font-feature-settings:"cv11","ss01"}
+.wrap{max-width:1440px;margin:0 auto;padding:14px 20px 32px;display:flex;flex-direction:column;gap:12px}
+header{display:flex;align-items:center;gap:12px;height:36px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.logo{width:22px;height:22px;border-radius:6px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink);font:700 12px var(--f-mono)}
+.brand h1{font:700 16px var(--f-body);margin:0;letter-spacing:-.01em}
+.brand small{color:var(--muted);padding-left:10px;border-left:1px solid var(--line-2)}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.status{display:inline-flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
+.status i{width:6px;height:6px;border-radius:50%;background:var(--good)}
+.btn{border:1px solid var(--line-2);background:var(--surface);color:var(--fg);padding:5px 11px;border-radius:6px;font:500 12.5px var(--f-body)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.kbd{font:500 10.5px var(--f-mono);color:var(--muted);border:1px solid var(--line-2);border-radius:4px;padding:0 4px;margin-left:6px}
+.rail{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:1fr 300px;gap:24px}
+.stages{display:grid;grid-template-columns:repeat(7,1fr);gap:0}
+.st{padding:0 12px;border-left:1px solid var(--line)} .st:first-child{border-left:0;padding-left:0}
+.st .n{font:600 22px/1.15 var(--f-mono);letter-spacing:-.02em}
+.st .nm{color:var(--muted);font-size:11.5px;display:flex;align-items:center;gap:5px}
+.st.on .n{color:var(--accent)}
+.sw{width:7px;height:7px;border-radius:50%;display:inline-block}
+.mix{grid-column:1/-1;display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--sunk);margin-top:10px}
+.side{display:flex;flex-direction:column;gap:7px;border-left:1px solid var(--line);padding-left:20px}
+.row{display:flex;justify-content:space-between;align-items:center}
+.lbl{color:var(--muted);font-size:11.5px}
+input[type=range]{width:100%;accent-color:var(--accent);height:14px;margin:0}
+.cap{display:flex;gap:3px} .cap i{flex:1;height:6px;border-radius:2px;background:var(--sunk)} .cap i.on{background:var(--accent)}
+.bar2{display:flex;gap:2px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+nav{display:flex;gap:2px}
+nav a{padding:7px 10px;color:var(--muted);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px}
+nav a.on{color:var(--fg);border-color:var(--fg)}
+.count{font:600 10.5px var(--f-mono);background:var(--warn-soft);color:var(--warn);border-radius:4px;padding:0 5px;margin-left:5px}
+.filters{display:flex;gap:6px;align-items:center;padding-bottom:6px}
+.inp{padding:5px 9px;border:1px solid var(--line-2);border-radius:6px;background:var(--surface);color:var(--muted);min-width:240px}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden} .seg span{padding:4px 9px;color:var(--muted)} .seg span.on{background:var(--sunk);color:var(--fg);font-weight:500}
+.main{display:grid;grid-template-columns:1fr 480px;gap:12px;align-items:start}
+.board{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.col{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-height:590px;overflow:hidden}
+.col-h{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);font-weight:600;font-size:12px;background:var(--sunk)}
+.col-h .mono{margin-left:auto;color:var(--muted);font-weight:500}
+.item{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.item.sel{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
+.sc{font:600 13px var(--f-mono);text-align:right;color:var(--muted);padding-top:1px}
+.sc.hi{color:var(--good)} .sc.mid{color:var(--warn)}
+.item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .s{color:var(--muted);font-size:12px;display:flex;gap:6px}
+.src{font:500 10.5px var(--f-mono);text-transform:uppercase;letter-spacing:.04em}
+.empty{padding:14px 10px;color:var(--muted);font-size:12px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.ph{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+.ph h2{font:600 17px/1.25 var(--f-body);margin:0}
+.pb{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.scorebox{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center}
+.big{font:600 44px/1 var(--f-mono);letter-spacing:-.04em;color:var(--good)}
+.bars{display:flex;flex-direction:column;gap:7px}
+.b{display:grid;grid-template-columns:76px 1fr 26px;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.tr{height:5px;background:var(--sunk);border-radius:3px} .tr b{display:block;height:100%;background:var(--fg);border-radius:3px}
+.reason{color:var(--fg);margin:0;font-size:12.5px;line-height:1.55}
+.grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.grid div{padding:7px 10px;border-bottom:1px solid var(--line)} .grid div:nth-child(odd){border-right:1px solid var(--line)}
+.grid div:nth-last-child(-n+2){border-bottom:0}
+.grid .k{display:block;color:var(--muted);font-size:11px}
+.skills{display:flex;flex-wrap:wrap;gap:4px} .sk{font-size:11.5px;padding:1px 7px;border-radius:4px;background:var(--sunk)} .sk.miss{background:transparent;border:1px dashed var(--line-2);color:var(--muted)}
+.actions{display:flex;gap:6px;flex-wrap:wrap;padding-top:4px;border-top:1px solid var(--line)}
+.tagline{position:fixed;right:14px;bottom:12px;font:600 11.5px var(--f-mono);background:var(--fg);color:var(--bg);padding:5px 10px;border-radius:5px;opacity:.85}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="logo">JP</span><h1>JobPilot</h1><small>AI BA · AI Product Analyst · Hyderabad · 2–4 yrs</small></div>
+    <span class="status"><i></i>DB live · <span class="mono">150</span> jobs · last search 04:06</span>
+    <button class="btn">Run search<span class="kbd">R</span></button>
+    <button class="btn primary">Add job<span class="kbd" style="color:inherit;border-color:currentColor">N</span></button>
+  </header>
+
+  <section class="rail">
+    <div class="stages">
+      <div class="st"><div class="n">100</div><div class="nm"><i class="sw" style="background:var(--muted)"></i>Found</div></div>
+      <div class="st on"><div class="n">45</div><div class="nm"><i class="sw" style="background:var(--accent)"></i>Shortlisted</div></div>
+      <div class="st"><div class="n">0</div><div class="nm"><i class="sw" style="background:var(--violet)"></i>Docs ready</div></div>
+      <div class="st"><div class="n">5</div><div class="nm"><i class="sw" style="background:var(--warn)"></i>Applied</div></div>
+      <div class="st"><div class="n">0</div><div class="nm"><i class="sw" style="background:var(--good)"></i>Interview</div></div>
+      <div class="st"><div class="n">0</div><div class="nm"><i class="sw" style="background:var(--good)"></i>Offer</div></div>
+      <div class="st"><div class="n">0</div><div class="nm"><i class="sw" style="background:var(--bad)"></i>Rejected</div></div>
+      <div class="mix"><i style="width:66.7%;background:var(--line-2)"></i><i style="width:30%;background:var(--accent)"></i><i style="width:3.3%;background:var(--warn)"></i></div>
+    </div>
+    <div class="side">
+      <div class="row"><span class="lbl">Shortlist threshold</span><span class="mono">60</span></div>
+      <input type="range" min="30" max="95" value="60">
+      <div class="row"><span class="lbl">Applied today</span><span class="mono">1 / 10</span></div>
+      <div class="cap"><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+  </section>
+
+  <div>
+    <div class="bar2">
+      <nav><a class="on">Board</a><a>Jobs</a><a>Review<span class="count">1</span></a><a>Runs</a><a>Answers</a><a>Analytics</a><a>Database</a><a>Settings</a></nav>
+      <div class="filters"><span class="inp">⌕ Search title, company, skill…  <span class="kbd">/</span></span><div class="seg"><span class="on">All</span><span>LinkedIn</span><span>Naukri</span></div><div class="seg"><span>Any score</span><span class="on">≥ 60</span></div></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="board">
+      <section class="col"><div class="col-h"><i class="sw" style="background:var(--muted)"></i>Found<span class="mono">100</span></div>
+        <div class="item"><span class="sc mid">58</span><div><div class="t">Product Analyst</div><div class="s">Mediamint<span class="src">nk</span><span>2d</span></div></div></div>
+        <div class="item"><span class="sc mid">52</span><div><div class="t">Business Analytics Lead Analyst</div><div class="s">Careernet<span class="src">nk</span><span>3d</span></div></div></div>
+        <div class="item"><span class="sc">45</span><div><div class="t">Business Analyst</div><div class="s">PwC<span class="src">nk</span><span>5d</span></div></div></div>
+        <div class="item"><span class="sc">41</span><div><div class="t">Guidewire Business Analyst</div><div class="s">Deloitte<span class="src">nk</span><span>6d</span></div></div></div>
+      </section>
+      <section class="col"><div class="col-h"><i class="sw" style="background:var(--accent)"></i>Shortlisted<span class="mono">45</span></div>
+        <div class="item sel"><span class="sc hi">96</span><div><div class="t">Business Analyst</div><div class="s">RSA America LLC<span class="src">li</span><span>today</span></div></div></div>
+        <div class="item"><span class="sc hi">90</span><div><div class="t">Agentic AI Business Analyst</div><div class="s">Sutherland<span class="src">nk</span><span>6d</span></div></div></div>
+        <div class="item"><span class="sc hi">90</span><div><div class="t">Dev Business Analyst</div><div class="s">Infor<span class="src">nk</span><span>today</span></div></div></div>
+        <div class="item"><span class="sc hi">90</span><div><div class="t">Business Analyst</div><div class="s">Micro1<span class="src">nk</span><span>15d</span></div></div></div>
+        <div class="item"><span class="sc hi">85</span><div><div class="t">Business Analyst II, BAR</div><div class="s">Amazon<span class="src">li</span><span>today</span></div></div></div>
+        <div class="item"><span class="sc hi">85</span><div><div class="t">Product Owner III</div><div class="s">Pdi Software India<span class="src">nk</span><span>4d</span></div></div></div>
+        <div class="item"><span class="sc hi">82</span><div><div class="t">Business Analyst</div><div class="s">Photon<span class="src">nk</span><span>15d</span></div></div></div>
+      </section>
+      <section class="col"><div class="col-h"><i class="sw" style="background:var(--violet)"></i>Docs ready<span class="mono">0</span></div><div class="empty">Drop a job here</div></section>
+      <section class="col"><div class="col-h"><i class="sw" style="background:var(--warn)"></i>Applied<span class="mono">5</span></div>
+        <div class="item"><span class="sc hi">83</span><div><div class="t">Product Owner III</div><div class="s">PDI Technologies<span class="src">li</span><span>8d</span></div></div></div>
+        <div class="item"><span class="sc hi">75</span><div><div class="t">Associate Product Analyst - Intern</div><div class="s">Leadrat CRM<span class="src">li</span><span>8d</span></div></div></div>
+      </section>
+    </div>
+
+    <aside class="panel">
+      <div class="ph"><div style="flex:1"><span class="lbl">RSA America LLC · LinkedIn · Hyderabad</span><h2>Business Analyst</h2></div><button class="btn">Esc</button></div>
+      <div class="pb">
+        <div class="scorebox">
+          <div><div class="big">96</div><div class="lbl">fit · legacy <span class="mono">71</span></div></div>
+          <div class="bars">
+            <div class="b"><span>Skills</span><span class="tr"><b style="width:95%"></b></span><span class="mono">95</span></div>
+            <div class="b"><span>Experience</span><span class="tr"><b style="width:100%"></b></span><span class="mono">100</span></div>
+            <div class="b"><span>Domain</span><span class="tr"><b style="width:93%"></b></span><span class="mono">93</span></div>
+          </div>
+        </div>
+        <p class="reason">Strong match for the AI-focused Business Process Analyst role: process analysis, documentation and hands-on AI tool and agent projects.</p>
+        <div class="skills"><span class="sk">Process mapping</span><span class="sk">AI workflows</span><span class="sk">SOPs</span><span class="sk">Stakeholders</span><span class="sk miss">Zapier</span></div>
+        <div class="grid"><div><span class="k">Status</span>Shortlisted ▾</div><div><span class="k">Experience</span>not stated</div><div><span class="k">Found</span>today 04:06</div><div><span class="k">Applied</span>—</div></div>
+        <div class="actions"><button class="btn primary">Queue for apply</button><button class="btn">Resume.docx</button><button class="btn">Cover.docx</button><button class="btn">Open folder</button></div>
+      </div>
+    </aside>
+  </div>
+</div>
+<span class="tagline">B · Ledger</span>
+<script>const t=new URLSearchParams(location.search).get("theme"); if(t) document.documentElement.dataset.theme=t;</script>
+</body>
+</html>

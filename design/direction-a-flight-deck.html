@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JobPilot · Direction A</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Direction A, "Flight deck": the prototype's language, refined. Comfortable density, soft cards, teal accent. */
+:root{
+  --bg:#f3f6f7; --surface:#fff; --sunk:#e9eff1; --fg:#11212b; --muted:#5b6c76; --line:#d5dee2;
+  --accent:#0b6d8f; --accent-soft:#dcedf3; --accent-ink:#fff;
+  --good:#1b7a4b; --good-soft:#ddf1e6; --warn:#995c00; --warn-soft:#f8ebd5; --bad:#b03a2e; --violet:#6a52b8;
+  --shadow:0 1px 2px rgba(16,36,48,.06),0 8px 24px rgba(16,36,48,.06);
+  --f-display:"Bricolage Grotesque",system-ui,sans-serif; --f-body:"IBM Plex Sans",system-ui,sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+:root[data-theme="dark"]{
+  --bg:#0c1318; --surface:#131d24; --sunk:#192530; --fg:#e3ebef; --muted:#8fa1ab; --line:#24333d;
+  --accent:#52b7dc; --accent-soft:#16323f; --accent-ink:#04202c;
+  --good:#52c78e; --good-soft:#133224; --warn:#e5a63f; --warn-soft:#382a12; --bad:#f07e72; --violet:#a796ea;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3); color-scheme:dark;
+}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--f-body)}
+.wrap{max-width:1440px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:16px}
+header{display:flex;align-items:center;gap:14px}
+.brand{display:flex;align-items:baseline;gap:12px;margin-right:auto}
+.brand h1{font:700 26px/1 var(--f-display);margin:0;letter-spacing:-.02em} .brand h1 b{color:var(--accent)}
+.brand small{color:var(--muted)}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:12.5px}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--good)}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:7px 14px;border-radius:8px;font:500 13.5px var(--f-body)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rail{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.stage{flex:1;padding:14px 16px;border-right:1px solid var(--line);position:relative}
+.stage.on{background:var(--accent-soft)}
+.stage .n{font:700 28px/1.05 var(--f-display);font-variant-numeric:tabular-nums}
+.stage .nm{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:2px;display:inline-block}
+.stage:not(:last-of-type)::after{content:"›";position:absolute;right:-5px;top:42%;color:var(--muted);background:var(--surface)}
+.gauge{flex:1.9;padding:12px 18px;display:flex;flex-direction:column;justify-content:center;gap:6px}
+.row{display:flex;justify-content:space-between;align-items:baseline}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.cap{height:7px;border-radius:4px;background:var(--sunk)} .cap b{display:block;height:100%;width:10%;background:var(--accent);border-radius:4px}
+nav{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+nav a{padding:9px 14px;color:var(--muted);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;text-decoration:none}
+nav a.on{color:var(--fg);border-color:var(--accent)}
+.badge{background:var(--warn);color:var(--surface);border-radius:9px;font-size:11px;padding:0 6px;margin-left:5px}
+.toolbar{display:flex;gap:8px;align-items:center}
+.toolbar .search{flex:0 1 340px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--muted)}
+.sel{padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.main{display:grid;grid-template-columns:1fr 520px;gap:16px;align-items:start}
+.board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.col{background:var(--sunk);border-radius:12px;padding:9px;display:flex;flex-direction:column;gap:9px;min-height:560px}
+.col-h{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13px;padding:2px 4px}
+.col-h .mono{margin-left:auto;color:var(--muted);font-size:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;box-shadow:var(--shadow)}
+.card.sel{outline:2px solid var(--accent);outline-offset:-1px}
+.card .t{font-weight:600;line-height:1.3}
+.meta{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.score{font:600 12px var(--f-mono);padding:1px 7px;border-radius:6px;background:var(--sunk);color:var(--muted)}
+.score.hi{background:var(--good-soft);color:var(--good)} .score.mid{background:var(--warn-soft);color:var(--warn)}
+.chip{font:500 11px var(--f-mono);padding:1px 7px;border-radius:5px;background:var(--sunk);color:var(--muted)}
+.drawer{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.drawer h2{font:700 22px/1.2 var(--f-display);margin:2px 0 0}
+.big{font:700 52px/1 var(--f-display);color:var(--good);font-variant-numeric:tabular-nums}
+.bars{display:flex;flex-direction:column;gap:9px;flex:1}
+.bar{display:grid;grid-template-columns:86px 1fr 30px;gap:10px;align-items:center;font-size:12.5px}
+.track{height:8px;border-radius:4px;background:var(--sunk)} .track b{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.reason{margin:0;padding:10px 12px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 8px 8px 0;font-size:13.5px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font-size:13px;margin:0} .kv dt{color:var(--muted)} .kv dd{margin:0}
+.tags{display:flex;gap:6px;flex-wrap:wrap} .tag{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line)}
+.tag.miss{border-style:dashed;color:var(--muted)}
+.docs{display:flex;gap:8px;flex-wrap:wrap}
+.tagline{position:fixed;right:14px;bottom:12px;font:600 12px var(--f-mono);background:var(--fg);color:var(--bg);padding:5px 10px;border-radius:6px;opacity:.85}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><h1>Job<b>Pilot</b></h1><small>AI BA · AI Product Analyst · Hyderabad · 2–4 yrs</small></div>
+    <span class="pill"><i></i>DB live · 150 jobs</span>
+    <button class="btn">Run search</button>
+    <button class="btn primary">Add job</button>
+  </header>
+
+  <section class="rail">
+    <div class="stage"><div class="n">100</div><div class="nm"><i class="dot" style="background:var(--muted)"></i>Found</div></div>
+    <div class="stage on"><div class="n">45</div><div class="nm"><i class="dot" style="background:var(--accent)"></i>Shortlisted</div></div>
+    <div class="stage"><div class="n">0</div><div class="nm"><i class="dot" style="background:var(--violet)"></i>Docs ready</div></div>
+    <div class="stage"><div class="n">5</div><div class="nm"><i class="dot" style="background:var(--warn)"></i>Applied</div></div>
+    <div class="stage"><div class="n">0</div><div class="nm"><i class="dot" style="background:var(--good)"></i>Interview</div></div>
+    <div class="stage"><div class="n">0</div><div class="nm"><i class="dot" style="background:var(--good)"></i>Offer</div></div>
+    <div class="stage"><div class="n">0</div><div class="nm"><i class="dot" style="background:var(--bad)"></i>Rejected</div></div>
+    <div class="gauge">
+      <div class="row"><span class="label">Shortlist threshold</span><span class="mono">60</span></div>
+      <input type="range" min="30" max="95" value="60">
+      <div class="row"><span class="label">Applied today</span><span class="mono">1 / 10</span></div>
+      <div class="cap"><b></b></div>
+    </div>
+  </section>
+
+  <nav><a class="on">Board</a><a>Jobs</a><a>Review queue<span class="badge">1</span></a><a>Agent runs</a><a>Answer bank</a><a>Analytics</a><a>Database</a><a>Settings</a></nav>
+
+  <div class="toolbar"><span class="search">Search title, company, skill…</span><span class="sel">All sources ▾</span><label class="sel"><input type="checkbox"> Score ≥ 60</label></div>
+
+  <div class="main">
+    <div class="board">
+      <section class="col"><div class="col-h"><i class="dot" style="background:var(--muted)"></i>Found<span class="mono">100</span></div>
+        <article class="card"><div class="t">Product Analyst</div><div class="meta">Mediamint</div><div class="meta"><span class="score mid">58</span><span class="chip">naukri</span><span style="margin-left:auto">2d</span></div></article>
+        <article class="card"><div class="t">Business Analytics Lead Analyst</div><div class="meta">Careernet</div><div class="meta"><span class="score mid">52</span><span class="chip">naukri</span><span style="margin-left:auto">3d</span></div></article>
+        <article class="card"><div class="t">Business Analyst</div><div class="meta">PwC</div><div class="meta"><span class="score">45</span><span class="chip">naukri</span><span style="margin-left:auto">5d</span></div></article>
+      </section>
+      <section class="col"><div class="col-h"><i class="dot" style="background:var(--accent)"></i>Shortlisted<span class="mono">45</span></div>
+        <article class="card sel"><div class="t">Business Analyst</div><div class="meta">RSA America LLC</div><div class="meta"><span class="score hi">96</span><span class="chip">linkedin</span><span style="margin-left:auto">today</span></div></article>
+        <article class="card"><div class="t">Agentic AI Business Analyst</div><div class="meta">Sutherland</div><div class="meta"><span class="score hi">90</span><span class="chip">naukri</span><span style="margin-left:auto">6d</span></div></article>
+        <article class="card"><div class="t">Dev Business Analyst</div><div class="meta">Infor</div><div class="meta"><span class="score hi">90</span><span class="chip">naukri</span><span style="margin-left:auto">today</span></div></article>
+        <article class="card"><div class="t">Business Analyst II, Business assessment and reinforcement</div><div class="meta">Amazon</div><div class="meta"><span class="score hi">85</span><span class="chip">linkedin</span><span style="margin-left:auto">today</span></div></article>
+      </section>
+      <section class="col"><div class="col-h"><i class="dot" style="background:var(--violet)"></i>Docs ready<span class="mono">0</span></div>
+        <div class="meta" style="padding:8px 4px">Drop a job here</div>
+      </section>
+      <section class="col"><div class="col-h"><i class="dot" style="background:var(--warn)"></i>Applied<span class="mono">5</span></div>
+        <article class="card"><div class="t">Product Owner III</div><div class="meta">PDI Technologies</div><div class="meta"><span class="score hi">83</span><span class="chip">linkedin</span><span style="margin-left:auto">8d</span></div></article>
+        <article class="card"><div class="t">Associate Product Analyst - Intern</div><div class="meta">Leadrat Real Estate CRM</div><div class="meta"><span class="score hi">75</span><span class="chip">linkedin</span><span style="margin-left:auto">8d</span></div></article>
+      </section>
+    </div>
+
+    <aside class="drawer">
+      <div class="row" style="align-items:flex-start"><div><span class="label">RSA America LLC · linkedin</span><h2>Business Analyst</h2></div><button class="btn">Close</button></div>
+      <div style="display:flex;gap:22px;align-items:center">
+        <div><div class="big">96</div><div class="label">fit score</div></div>
+        <div class="bars">
+          <div class="bar"><span>Skills</span><span class="track"><b style="width:95%"></b></span><span class="mono">95</span></div>
+          <div class="bar"><span>Experience</span><span class="track"><b style="width:100%"></b></span><span class="mono">100</span></div>
+          <div class="bar"><span>Domain</span><span class="track"><b style="width:93%"></b></span><span class="mono">93</span></div>
+        </div>
+      </div>
+      <p class="reason">Strong match for the AI-focused Business Process Analyst role: process analysis, documentation and hands-on AI tool and agent projects.</p>
+      <div class="tags"><span class="tag">Process mapping</span><span class="tag">AI workflows</span><span class="tag">SOPs</span><span class="tag">Stakeholders</span><span class="tag miss">Zapier</span></div>
+      <dl class="kv"><dt>Location</dt><dd>Hyderabad</dd><dt>Experience</dt><dd>not stated</dd><dt>Legacy rule score</dt><dd class="mono">71</dd><dt>Found</dt><dd>today, 04:06</dd></dl>
+      <div class="row" style="gap:10px"><span class="sel" style="flex:1">Shortlisted ▾</span><button class="btn primary">Queue for apply</button></div>
+      <div class="docs"><button class="btn">Resume.docx</button><button class="btn">Cover letter.docx</button><button class="btn">Open folder</button></div>
+    </aside>
+  </div>
+</div>
+<span class="tagline">A · Flight deck</span>
+<script>const t=new URLSearchParams(location.search).get("theme"); if(t) document.documentElement.dataset.theme=t;</script>
+</body>
+</html>
