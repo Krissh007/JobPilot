@@ -17,6 +17,8 @@ class Config(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = ""
     gemini_rpm: int = 8
+    # Comma-separated models to switch to when GEMINI_MODEL's daily quota runs out
+    gemini_fallback_models: str = ""
 
     database_url: str = f"sqlite:///{(DATA_DIR / 'jobpilot.db').as_posix()}"
     legacy_agent_dir: Path = Path(r"E:\job_search_agent")

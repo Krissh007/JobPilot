@@ -7,8 +7,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 | 0 Design | ✅ approved | Wrap `E:\job_search_agent`; separate `jobpilot.db`; JobPilot owns apply + scheduling |
 | 1 DB + migrations + seed | ✅ done | See below |
 | 2 Search integration | ✅ done | See below |
-| 3 Scorer | 🔒 blocked: real run pending | Built and tested with Gemini mocked. Needs `GEMINI_API_KEY` + `GEMINI_MODEL` in `.env`, then a real scoring run |
-| 4 FastAPI + pytest | waits for Phase 3 | |
+| 3 Scorer | ✅ done, verified with a real run | 149/150 real jobs scored with gemini-3.5-flash-lite + prompt v3 |
+| 4 FastAPI + pytest | ⏳ next | |
 | 5 Dashboard UI | — | 2 visual directions first |
 | 6 Docs generator | — | Reuses legacy `src/tailoring` |
 | 7 Auto-apply + review queue | — | LinkedIn, then Naukri (pre-check → approve → apply) |
@@ -57,3 +57,15 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 - Bug found by the real run: a missing key was counted per job as "bad output" and the run ended `ok`. Config errors now stop the run as `error` (run #8).
 - Real queue: 150 unscored real jobs, 149 of them with a usable JD.
 - Tests: 41 passed, with Gemini mocked: client fake + HTTP opener fake, backoff timing, cache hit, resume change, quota stop, config stop.
+
+### Phase 3 real verification (2026-10-06, after the key was added)
+- Real calls work: 3 jobs scored with gemini-3.8-flash. The cache hit and the resume-change re-score both behaved as expected (a temporary resume copy was used; the real resume was not touched).
+- Problems the real runs found, all fixed:
+  1. **Generic BA roles scored 85–92.** The v2 prompt makes domain favour AI roles. v3 judges domain only from the responsibilities: flash-lite had been crediting Naukri's "Department: Data Science & Analytics" label and the company blurb. Roles with no AI component are capped at 70.
+  2. **gemini-3.8-flash allows only 20 requests/day on the free tier.** The client retried that limit for 46 minutes. Daily-quota 429s now fail in one call (the quota id and reset time are in the message), with optional `GEMINI_FALLBACK_MODELS`.
+  3. **Backoff was invisible.** Retries now appear in the agent_runs log.
+- Your decision: scoring uses `GEMINI_MODEL=gemini-3.5-flash-lite` (only that line in .env was changed). The cache was cleared so all scores come from one model and the v3 prompt.
+- Tests: 43 passed.
+- Real backfill (run #16): 146 jobs in 18 min, 0 failures, 0 retries. Result: 45 shortlisted, 100 found, 5 applied. 1 job has no usable JD.
+  Score histogram: 10s:4, 20s:12, 30s:9, 40s:16, 50s:59, 60s:16, 70s:24, 80s:4, 90s:5. 19 jobs are AI-centred (domain ≥ 75).
+  Spot-checked top scores (RSA, Sutherland "Agentic AI BA", Amazon, Infor): the AI work is in the responsibilities themselves.

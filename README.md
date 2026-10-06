@@ -59,5 +59,11 @@ Free tier:
 - Results are cached by `sha256(prompt version + JD + resume version)`. Editing the resume changes its version, so jobs are scored again.
 - When the quota runs out, finished jobs are kept and the rest wait for the next run.
 - A missing key or a wrong model name stops the run immediately as an error.
+- Daily quotas are not retried. Some free-tier models allow only 20 requests a day (gemini-3.8-flash did).
+  When the daily quota is used up, the run moves to the next model in `GEMINI_FALLBACK_MODELS`, or stops at once.
+- Scoring uses `gemini-3.5-flash-lite` (set in `.env`). It is fast and its free quota is much larger, and it
+  keeps the stronger model's small daily quota free for tailored documents.
+- Domain is judged only from the role's own responsibilities. Naukri's "Department: Data Science &
+  Analytics" label and the company's "About" text are ignored. Roles with no AI/ML component are capped at 70.
 
 On Gemini's free tier, Google may use what you send (your resume and the JDs) to improve its products.

@@ -240,7 +240,7 @@ def test_parse_json_rejects_non_objects():
 
 def test_config_error_stops_the_run_as_error(db_url, resume, monkeypatch):
     add_job(db_url)
-    monkeypatch.setattr(score, "GeminiClient", lambda: GeminiClient(api_key="", model="m"))
+    monkeypatch.setattr(score, "GeminiClient", lambda **kw: GeminiClient(api_key="", model="m"))
     with pytest.raises(LLMError, match="GEMINI_API_KEY"):
         score.run(db_url=db_url)
     run = last_run(db_url)
@@ -254,3 +254,40 @@ def test_bad_model_name_is_a_config_error(db_url, resume):
     with pytest.raises(LLMConfigError):
         score.run(db_url=db_url, client=FakeClient(LLMConfigError("Gemini HTTP 404: model not found")))
     assert get(db_url, Job, job_id).score is None and last_run(db_url).status == RunStatus.error
+
+
+DAILY_429 = json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "details": [
+    {"@type": "type.googleapis.com/google.rpc.QuotaFailure",
+     "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier", "quotaValue": "20"}]},
+    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "83883s"}]}})
+
+
+def test_daily_quota_is_not_retried():
+    clock = FakeClock()
+    client = make_client([http_error(429, DAILY_429)], clock)
+    with pytest.raises(QuotaExhausted, match=r"daily free-tier quota used up \(GenerateRequestsPerDayPerProjectPerModel-FreeTier=20\); resets in ~23h"):
+        client.generate_json("sys", "prompt")
+    assert client.calls == 1 and not [s for s in clock.slept if s >= 1]
+
+
+def test_daily_quota_switches_to_fallback_model(monkeypatch):
+    from jobpilot.config import Config
+
+    monkeypatch.setattr("jobpilot.llm.gemini.get_config", lambda: Config(
+        gemini_api_key="k", gemini_model="big-model", gemini_fallback_models="lite-model", gemini_rpm=600))
+    urls = []
+    outcomes = iter([http_error(429, DAILY_429), ok_payload('{"a": 2}'), ok_payload('{"a": 3}')])
+
+    def opener(request, timeout):
+        urls.append(request.full_url)
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return FakeResponse(outcome)
+
+    notes = []
+    client = GeminiClient(sleep=FakeClock().sleep, opener=opener, on_retry=notes.append)
+    assert client.generate_json("s", "p") == {"a": 2} and client.model_name == "lite-model"
+    assert client.generate_json("s", "p") == {"a": 3}  # stays on the fallback
+    assert ["big-model" in urls[0], "lite-model" in urls[1], "lite-model" in urls[2]] == [True] * 3
+    assert "switching to lite-model" in notes[0]

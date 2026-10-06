@@ -29,7 +29,7 @@ from jobpilot.llm.cache import cache_get, cache_key, cache_put
 from jobpilot.llm.gemini import GeminiClient, LLMConfigError, LLMError, QuotaExhausted
 from jobpilot.resume import Resume, load_resume
 
-PROMPT_VERSION = "score:v1"  # bump when the prompt changes so cached results are not reused
+PROMPT_VERSION = "score:v3"  # bump when the prompt changes so cached results are not reused
 MIN_JD_CHARS = 150
 MAX_JD_CHARS = 12_000  # keeps each request small on the free tier
 
@@ -46,9 +46,18 @@ Return JSON only, exactly this shape:
 - skills: overlap between required skills/tools and those the resume demonstrates.
 - experience: fit of the candidate's years and seniority to the JD's range
   (candidate targets 2-4 years; far outside the JD's range scores low).
-- domain: fit of industry and problem space (AI/ML products, analytics, business analysis).
+- domain: fit to the candidate's target roles, AI Business Analyst / AI Product Analyst:
+  85-100 the role centres on AI, ML, GenAI/LLM, data-science or data-product work;
+  60-80 analytics-heavy or data-platform work with some AI/ML exposure;
+  40-60 generic business or product analysis with no AI/ML component;
+  below 40 an unrelated specialism (e.g. SAP functional, Guidewire, insurance core systems, sales).
 - score: overall fit, roughly 0.45*skills + 0.30*experience + 0.25*domain, adjusted for hard
   blockers (e.g. a mandatory certification or 8+ years required).
+  If the role has no AI, ML, GenAI or data-product component, score must not exceed 70.
+  Judge domain ONLY from the role's own responsibilities and requirements. Ignore portal metadata
+  (e.g. Naukri's "Department: Data Science & Analytics", "Role Category"), the "About company"
+  section and company taglines: a generic BA role at an AI company is still a generic BA role.
+  The reason must name the AI/ML work in the responsibilities, or say there is none.
 Lists: at most 12 items each, short skill names."""
 
 
@@ -136,7 +145,7 @@ def score_jobs(session: Session, rec: RunRecorder, client: JSONClient | None, re
         key = cache_key(PROMPT_VERSION, job.jd_text, resume.version)
         cached = cache_get(session, key)
         if cached is None and client is None:
-            client = GeminiClient()  # created only when needed; a config error ends the run
+            client = GeminiClient(on_retry=rec.log)  # created only when needed; a config error ends the run
         try:
             if cached is not None:
                 result, origin = ScoreResult.model_validate(cached), "cache"
