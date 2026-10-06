@@ -1,4 +1,4 @@
-"""The master resume every agent scores and tailors against."""
+"""The master resume every agent scores and tailors against (RESUME_PATH in .env)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class Resume:
 
     @property
     def version(self) -> str:
-        # Content hash: editing the resume changes the version and invalidates cached scores.
+        # Content hash: editing the resume changes the version and invalidates cached LLM results.
         return hashlib.sha256(self.text.encode("utf-8")).hexdigest()[:12]
 
 
@@ -33,9 +33,18 @@ def load_resume(path: Path | None = None) -> Resume:
     path = path or resume_path()
     if not path.is_file():
         raise ResumeError(f"Master resume not found: {path} (set RESUME_PATH in .env)")
-    if path.suffix.lower() not in (".md", ".txt"):
-        raise ResumeError(f"{path.name}: only .md/.txt resumes are supported for now (.docx comes with the docs agent)")
-    text = path.read_text(encoding="utf-8").strip()
+    suffix = path.suffix.lower()
+    if suffix in (".md", ".txt"):
+        text = path.read_text(encoding="utf-8").strip()
+    elif suffix in (".docx", ".pdf"):
+        from jobpilot.legacy.bridge import load_master_resume
+
+        try:
+            text = load_master_resume(path)  # same reader the tailoring uses, so both see identical text
+        except ValueError as error:
+            raise ResumeError(str(error)) from error
+    else:
+        raise ResumeError(f"{path.name}: use a .docx, .pdf, .md or .txt resume")
     if len(text) < 200:
         raise ResumeError(f"{path} looks empty ({len(text)} characters)")
     return Resume(path=path, text=text)

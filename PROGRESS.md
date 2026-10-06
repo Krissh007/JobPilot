@@ -10,8 +10,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 | 3 Scorer | ✅ done, verified with a real run | 149/150 real jobs scored with gemini-3.5-flash-lite + prompt v3 |
 | 4 FastAPI + pytest | ✅ done, verified with a real run | 31 operations, live on the real DB |
 | 5 Dashboard UI | ✅ done, verified with a real run | Direction: B layout + A colours (your pick) |
-| 6 Docs generator | ⏳ next | Reuses legacy `src/tailoring` |
-| 7 Auto-apply + review queue | — | LinkedIn, then Naukri (pre-check → approve → apply) |
+| 6 Docs generator | ✅ done, verified with a real run | Resume: your recent .docx · model gemini-3.5-flash-lite |
+| 7 Auto-apply + review queue | ⏳ next | LinkedIn, then Naukri (pre-check → approve → apply) |
 | 8 Scheduler | — | Windows Task Scheduler, 08–20 IST every 4 h |
 | 9 Analytics + README | — | |
 
@@ -122,3 +122,24 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 - `npm run build`: 314 kB JS (94 kB gzipped). Screenshots in light and dark: `design/screens/`.
 - Tests: 62 pytest passed. The Playwright smoke test is in Phase 9, as planned.
 
+
+## Phase 6: docs generator (2026-10-06)
+- Prerequisites (your answers):
+  - Resume: `E:\Krishna BA Resume\Krishna_Maheswaram_AI_Business_Analyst_Resume_Naukri.docx`. It's the most recent general version (29 Sep 13:58) with the corrected dates (LogNormal Oct 2025–Sep 2026, Softic Feb 2024–Sep 2025, NZX Feb 2022–Feb 2024). The other 12 versions were compared; the Infor ones are tailored to one job and older ones have the old dates.
+  - The content is identical to the `master_resume.md` used for scoring (similarity 1.0), so existing scores stand.
+  - `RESUME_PATH` was added to `.env` (one line; the key wasn't read or touched). Model: `gemini-3.5-flash-lite`.
+- `jobpilot/legacy/bridge.py` imports the legacy `src.tailoring` (prompt, fact check, `.docx` writer, report) unchanged. `resume.py` reads `.docx`/`.pdf` with the legacy reader, so scoring and tailoring see the same text.
+- `jobpilot/agents/docs.py`:
+  - Selection: shortlisted, non-example jobs with a JD ≥ 300 chars and no documents yet, best score first.
+  - Output goes to `output/<Company>_<id>/`. The raw model JSON is cached; the checks re-run every time.
+  - New date/title check, because the legacy fact check didn't verify either: dates are corrected from your resume, and an unknown title fails the job so nothing is written.
+  - Moves the job shortlisted → docs_ready (actor agent). "Run now" for docs is enabled in the API and the Runs screen, and the drawer has Resume, Cover, Report and Open folder.
+- Real run #26: Techdome, Infor and Sutherland, about 6 s each.
+  - Every date in the 3 resumes equals your corrected dates, titles are verbatim, and the cover letters contain no invented numbers.
+  - ATS keyword coverage: Infor 93%, Techdome 43%, Sutherland 36%. The gaps (BPMN, SIPOC, n8n, LangChain…) are listed in each report, not invented.
+  - The fact check removed "Process Mapping" from Sutherland's skills (not in your resume).
+  - Run #27 (Run now from the API) regenerated Sutherland from the cache with no Gemini call.
+- Notes:
+  - RSA America (96) was skipped because you moved it to Applied from the dashboard at 15:43 IST.
+  - flash-lite's cover letters run about 215 words, under the legacy prompt's 250–350 target.
+- Tests: 68 passed. New: real legacy tailoring with a fake Gemini, covering invented skill and number removed, old dates corrected, unknown title writes nothing, cache, company-name variants, and selection.

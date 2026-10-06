@@ -73,6 +73,32 @@ Free tier:
 
 On Gemini's free tier, Google may use what you send (your resume and the JDs) to improve its products.
 
+## Docs agent (tailored resume + cover letter)
+
+```powershell
+.\.venv\Scripts\python -m jobpilot.agents.docs              # up to 10 shortlisted jobs without documents
+.\.venv\Scripts\python -m jobpilot.agents.docs --job-id 111 # (re)generate for one job
+```
+
+For each shortlisted job it writes `output\<Company>_<id>\` with these files:
+- `<Name>_Resume_<Company>.docx`
+- `<Name>_Cover_Letter_<Company>.docx`
+- `match_report.md`: JD keywords covered and missing, plus every fact-check fix
+
+It then moves the job to **Docs ready**.
+
+**Truthfulness.** The legacy tailoring is reused unchanged. Its prompt allows only facts from the master resume, and its fact check removes:
+- skills, companies, institutions and certifications that aren't in the resume;
+- bullets and sentences containing numbers that aren't in the resume.
+
+JobPilot adds one more check:
+- Every role's dates must match your resume's dates for that company. Dates that don't match are corrected and the fix is logged.
+- A job title that isn't in your resume fails that job, so nothing is written for it.
+
+Anything the JD asks for that your resume doesn't show is listed in the report and never added.
+
+Your resume is `RESUME_PATH` in `.env`; scoring uses the same file. When you save a new version, point `RESUME_PATH` at it. The new content gets a new version hash, so documents and scores are regenerated instead of coming from the cache. Contact details come from the legacy `config\application_profile.yaml`. Review every document before you upload it.
+
 ## API (backend for the dashboard)
 
 ```powershell

@@ -8,7 +8,7 @@ import { Button, Empty, ExampleTag, Panel, cx, duration, when } from "../ui";
 const AGENTS: { name: AgentName; title: string; desc: string; phase?: string }[] = [
   { name: "search", title: "Search", desc: "Legacy discovery + matching on Naukri and LinkedIn, saved into jobpilot.db." },
   { name: "score", title: "Score", desc: "Gemini scores unscored JDs against your resume and shortlists ≥ threshold." },
-  { name: "docs", title: "Docs", desc: "Tailored ATS resume + cover letter for shortlisted jobs.", phase: "Phase 6" },
+  { name: "docs", title: "Docs", desc: "Tailored ATS resume + cover letter (.docx) for shortlisted jobs, fact-checked against your resume." },
   { name: "apply", title: "Apply", desc: "Fills Easy Apply forms, screenshots, stops before Submit.", phase: "Phase 7" },
 ];
 
@@ -47,6 +47,7 @@ export function Runs() {
   const [live, setLive] = useState<number | null>(null);
   const [thenScore, setThenScore] = useState(true);
   const [limit, setLimit] = useState(20);
+  const [docsLimit, setDocsLimit] = useState(5);
   const [open, setOpen] = useState<number | null>(null);
   const [log, setLog] = useState<string>("");
 
@@ -74,14 +75,15 @@ export function Runs() {
             <section key={a.name} className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3.5">
               <header className="flex items-center gap-2"><h3 className="mr-auto font-display text-[15px] font-semibold">{a.title}</h3>{prev ? <StatusChip status={prev.status} /> : <span className="text-[11.5px] text-muted">no runs</span>}</header>
               <p className="m-0 text-[12.5px] text-muted">{a.desc}</p>
-              <div className="num text-[11.5px] text-muted">{prev ? <>last {when(prev.started_at)} · {prev.processed} processed · {prev.found} {a.name === "score" ? "shortlisted" : "new"}</> : "never run"}</div>
+              <div className="num text-[11.5px] text-muted">{prev ? <>last {when(prev.started_at)} · {prev.processed} processed · {prev.found} {a.name === "score" ? "shortlisted" : a.name === "docs" ? "with docs" : "new"}</> : "never run"}</div>
               {a.name === "search" && <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={thenScore} onChange={(e) => setThenScore(e.target.checked)} className="accent-[var(--accent)]" />then score new jobs</label>}
+              {a.name === "docs" && <label className="flex items-center gap-1.5 text-[12px]">up to <input type="number" min={1} max={50} value={docsLimit} onChange={(e) => setDocsLimit(Number(e.target.value))} className="num w-16 rounded-md border border-line-2 bg-bg px-2 py-0.5 text-fg focus:border-accent focus:outline-none" /> jobs</label>}
               {a.name === "score" && <label className="flex items-center gap-1.5 text-[12px]">up to <input type="number" min={1} max={500} value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="num w-16 rounded-md border border-line-2 bg-bg px-2 py-0.5 text-fg focus:border-accent focus:outline-none" /> jobs</label>}
               <div className="mt-auto pt-1">
                 {a.phase
                   ? <Button disabled title={`Arrives in ${a.phase}`}>Run now · {a.phase}</Button>
                   : <Button variant="primary" disabled={start.isPending || running(a.name)}
-                      onClick={() => start.mutate({ agent: a.name, options: a.name === "search" ? { then_score: thenScore } : { limit } })}>
+                      onClick={() => start.mutate({ agent: a.name, options: a.name === "search" ? { then_score: thenScore } : { limit: a.name === "docs" ? docsLimit : limit } })}>
                       {running(a.name) ? "Running…" : "Run now"}
                     </Button>}
               </div>

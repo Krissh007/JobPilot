@@ -5,6 +5,10 @@ pydantic-settings>=2.4
 python-dotenv>=1.0
 openpyxl>=3.1
 
+# Phase 6: documents (also needed by the reused legacy tailoring code)
+python-docx>=1.1
+PyYAML>=6
+
 # Phase 4: API
 fastapi>=0.115
 uvicorn>=0.30
