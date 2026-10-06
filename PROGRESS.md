@@ -9,8 +9,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 | 2 Search integration | ✅ done | See below |
 | 3 Scorer | ✅ done, verified with a real run | 149/150 real jobs scored with gemini-3.5-flash-lite + prompt v3 |
 | 4 FastAPI + pytest | ✅ done, verified with a real run | 31 operations, live on the real DB |
-| 5 Dashboard UI | ⏳ next | 2 visual directions first |
-| 6 Docs generator | — | Reuses legacy `src/tailoring` |
+| 5 Dashboard UI | ✅ done, verified with a real run | Direction: B layout + A colours (your pick) |
+| 6 Docs generator | ⏳ next | Reuses legacy `src/tailoring` |
 | 7 Auto-apply + review queue | — | LinkedIn, then Naukri (pre-check → approve → apply) |
 | 8 Scheduler | — | Windows Task Scheduler, 08–20 IST every 4 h |
 | 9 Analytics + README | — | |
@@ -103,5 +103,22 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 - Also on your request: the old exposed key file `E:\job_search_agent\.env.txt` was moved to the Recycle Bin. JobPilot's `.env` stays.
 - Tests: 61 passed. A new test drives the stdout protocol through a fake shim and checks that nothing is written into the legacy folder.
 
-## Phase 5: dashboard UI (in progress)
-- Two static visual directions: `design/direction-a-flight-deck.html` and `design/direction-b-ledger.html`, with light and dark PNGs. Waiting for your pick.
+## Phase 5: dashboard UI (2026-10-06)
+- Directions: `design/direction-a-flight-deck.html` and `design/direction-b-ledger.html`. You picked a mix: **B's layout** (dense rows, proportional pipeline bar, segmented filters, keyboard hints) with **A's colours and type** (teal on blue-grey, Bricolage Grotesque + IBM Plex).
+- `web/`: React 19, Vite 8, Tailwind 4, TypeScript and React Query. Every colour is a CSS variable, with light, dark and system themes.
+  - Screens: rail, Board (drag-and-drop), Jobs table, job drawer, Add job, Review queue, Runs (Run now + SSE live log), Answers, Database, Settings. Analytics shows a placeholder until Phase 9.
+- New API routes: `GET /api/stats/tables` (row counts) and `GET /api/system` (non-secret config; the key is reported only as set or not set, and a test checks it never appears).
+- The search agent now takes its queries from the Settings screen (`settings.search_queries`), so they live in one place.
+- Real-browser verification (headless Chromium against the live API and the real DB; anything that changes data used example rows only, and the examples were reset afterwards):
+  - Drag found→shortlisted persisted with actor `user`. Full-text search for "agentic" returned the Sutherland Agentic AI BA.
+  - Notes autosave, and the drawer's status select, both persisted.
+  - Adding a duplicate URL opened the existing job instead of creating a copy.
+  - The threshold slider saved 61 and was restored to 60.
+  - Approve in the review queue worked.
+  - Run now (score run #22) streamed its log live to `finished`.
+  - Answer bank add, edit and delete worked.
+  - No console errors. No horizontal page scroll at 390 px phone width.
+- Bugs found in the screenshots and fixed: 7 board columns overflowed at 1440 px; the "up to N jobs" input stretched full width (a `w-full` class conflict); the Jobs "Score ↓" header wrapped.
+- `npm run build`: 314 kB JS (94 kB gzipped). Screenshots in light and dark: `design/screens/`.
+- Tests: 62 pytest passed. The Playwright smoke test is in Phase 9, as planned.
+

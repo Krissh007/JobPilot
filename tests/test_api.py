@@ -287,3 +287,13 @@ def test_crashed_process_is_marked_error(client, db_url, monkeypatch):
     run_id = client.post("/api/runs/score").json()["id"]
     run = client.get(f"/api/runs/{run_id}").json()
     assert run["status"] == "error" and "exited with code 1" in run["error"]
+
+
+def test_table_counts_and_system_info_never_leak_key(client, seeded):
+    counts = client.get("/api/stats/tables").json()
+    assert counts["jobs"] == 15 and counts["application_fields"] == 4 and counts["settings"] == 4
+    info = client.get("/api/system").json()
+    assert set(info) >= {"gemini_model", "gemini_key_set", "legacy_agent_dir", "resume_path"}
+    from jobpilot.config import get_config
+    key = get_config().gemini_api_key
+    assert not key or key not in json.dumps(info)

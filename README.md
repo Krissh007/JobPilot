@@ -93,3 +93,29 @@ any request that doesn't come from this computer.
   for review. The apply agent (Phase 7) is the only thing that touches the browser.
 - **Other routes:** answers CRUD, settings (validated: threshold 30–95, daily cap 1–40), analytics (funnel, score
   histogram, applications per day), and CSV/JSON export.
+
+## Dashboard
+
+```powershell
+cd E:\JobPilot\web
+$env:npm_config_cache = "E:\JobPilot\.cache\npm"
+npm install                                   # first time only
+powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\run_api.ps1   # terminal 1
+powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\run_web.ps1   # terminal 2 → http://127.0.0.1:5173
+```
+
+The dashboard is built with React, Vite, Tailwind and TypeScript. It uses the "Ledger" layout with the "Flight deck" palette and type, in light and dark mode (the header toggle cycles system → light → dark).
+
+| Screen | What it does |
+|---|---|
+| **Pipeline rail** | Stage counts (click one to filter), a proportional bar, the threshold slider (saved when you release it), and applied today vs the cap |
+| **Board** | Dense rows per stage. Drag a row to another column to change its status, and the move is written to history |
+| **Jobs** | Sortable table: score, role, company, location, experience, source, rule score, status, found |
+| **Job drawer** | Score and sub-score bars, the reason, matched skills, status, notes (saved when you leave the field), posting link, documents, JD, history, delete |
+| **Review** | Filled fields with the Gemini-drafted answers highlighted, a screenshot, and Approve submit / Skip. Blocked applications are listed separately |
+| **Runs** | Run now for search and score, with a live log over Server-Sent Events, plus run history with logs |
+| **Answers** | Add, edit and delete screening answers |
+| **Database** | Table cards with row counts, CSV/JSON export, import from the legacy archive, and removing or adding the example rows |
+| **Settings** | Threshold, daily cap and search queries (the search agent uses these), schedule, Gemini model and key status (the key is never shown), and the site-terms warning |
+
+Keyboard: `/` jumps to search, `N` adds a job, `Esc` closes the drawer.

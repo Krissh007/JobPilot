@@ -25,6 +25,7 @@ from sqlmodel import Session, select
 from jobpilot.agents._run import RunRecorder, agent_run
 from jobpilot.config import DATA_DIR, get_config
 from jobpilot.db.models import AgentName, Job
+from jobpilot.db.repo import get_setting
 from jobpilot.db.session import get_engine
 from jobpilot.legacy.importer import import_legacy, import_rows
 
@@ -77,6 +78,8 @@ def run(import_legacy_db: bool = False, keywords: list[str] | None = None,
                 result = import_legacy(session, legacy_dir, log=rec.log)
             else:
                 known = list(session.exec(select(Job.url)))
+                keywords = keywords or get_setting(session, "search_queries")  # Settings screen is the source of truth
+                rec.log(f"Keywords: {', '.join(keywords)}")
                 stats, jobs = run_legacy_search(rec, legacy_dir, config.legacy_python, known, keywords, sources)
                 if stats:
                     rec.log(f"Legacy stats: discovered {stats['discovered']}, stale {stats['stale']}, "
@@ -91,7 +94,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--import-legacy-db", action="store_true",
                         help="Skip the browser search; copy jobs from the old legacy data/jobs.db (read-only)")
-    parser.add_argument("--keywords", nargs="+", help="Override the legacy search keywords for this run")
+    parser.add_argument("--keywords", nargs="+", help="Override the search queries from Settings for this run")
     parser.add_argument("--sources", nargs="+", help="Override the legacy sources for this run (naukri, linkedin)")
     parser.add_argument("--then-score", action="store_true", help="Run the score agent afterwards (even if search failed)")
     parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)  # set by the dashboard API

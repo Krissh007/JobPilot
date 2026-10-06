@@ -1,0 +1,121 @@
+// Typed client for the JobPilot FastAPI backend (proxied at /api by Vite).
+
+export const STAGES = ["found", "shortlisted", "docs_ready", "applied", "interview", "offer", "rejected"] as const;
+export type Stage = (typeof STAGES)[number];
+export const STAGE_LABEL: Record<Stage, string> = {
+  found: "Found", shortlisted: "Shortlisted", docs_ready: "Docs ready", applied: "Applied",
+  interview: "Interview", offer: "Offer", rejected: "Rejected",
+};
+export const STAGE_COLOR: Record<Stage, string> = {
+  found: "var(--muted)", shortlisted: "var(--accent)", docs_ready: "var(--violet)", applied: "var(--warn)",
+  interview: "var(--good)", offer: "var(--good)", rejected: "var(--bad)",
+};
+
+export interface Meta {
+  db: string; total_jobs: number; example_jobs: number; unscored: number;
+  stages: Record<Stage, number>; applied_today: number; daily_apply_cap: number; threshold: number;
+  pending_review: number; blocked: number; running: { id: number; agent: string; started_at: string }[]; today: string;
+}
+
+export interface JobSummary {
+  id: number; title: string; company: string; source: string; location: string;
+  exp_min: number | null; exp_max: number | null; score: number | null; score_skills: number | null;
+  score_experience: number | null; score_domain: number | null; legacy_score: number | null;
+  status: Stage; found_at: string; applied_at: string | null; is_example: boolean; skills: string[]; has_docs: boolean;
+}
+
+export interface HistoryRow { from_status: Stage | null; to_status: Stage; changed_at: string; actor: "user" | "agent" }
+
+export interface JobDetail extends JobSummary {
+  url: string; jd_text: string; score_reason: string; notes: string; resume_version: string;
+  docs: { resume: boolean; cover: boolean; report: boolean; folder: string | null };
+  applications: { id: number; state: string; created_at: string; decided_at: string | null }[];
+  history: HistoryRow[];
+}
+
+export interface AppField { id: number; step: number; field_name: string; value_used: string; source: "resume" | "answer_bank" | "llm"; needs_review: boolean }
+export interface Application {
+  id: number; job_id: number; state: "filling" | "pending_review" | "approved" | "submitted" | "skipped" | "blocked";
+  screenshot_path: string; has_screenshot: boolean; created_at: string; decided_at: string | null; is_example: boolean;
+  job: { id: number; title: string; company: string; score: number | null; source: string; url: string } | null;
+  fields: AppField[]; needs_review: number;
+}
+
+export type AgentName = "search" | "score" | "docs" | "apply";
+export interface Run {
+  id: number; agent: AgentName; started_at: string; finished_at: string | null; found: number; processed: number;
+  status: "running" | "ok" | "error"; error: string; is_example: boolean; log_lines: number; log?: string;
+}
+
+export interface Answer { id: number; question: string; answer: string; tags: string; times_used: number; created_at: string; updated_at: string; is_example: boolean }
+
+export interface Settings {
+  threshold: number; daily_apply_cap: number; search_queries: string[];
+  schedule: { every_hours: number; start: string; end: string; timezone: string };
+}
+
+export interface SystemInfo {
+  gemini_model: string; gemini_fallback_models: string; gemini_key_set: boolean; gemini_rpm: number;
+  legacy_agent_dir: string; legacy_python: string; resume_path: string;
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, public detail: unknown) {
+    super(typeof detail === "string" ? detail : (detail as { message?: string })?.message ?? `HTTP ${status}`);
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers: init?.body ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
+  });
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try { detail = (await response.json()).detail; } catch { /* not JSON */ }
+    throw new ApiError(response.status, detail);
+  }
+  return response.status === 204 ? (undefined as T) : response.json();
+}
+
+export interface JobQuery { status?: Stage[]; source?: string; min_score?: number; q?: string; include_examples?: boolean; sort?: string; order?: "asc" | "desc" }
+
+export function jobQueryString(q: JobQuery): string {
+  const params = new URLSearchParams();
+  q.status?.forEach((s) => params.append("status", s));
+  if (q.source) params.set("source", q.source);
+  if (q.min_score != null) params.set("min_score", String(q.min_score));
+  if (q.q?.trim()) params.set("q", q.q.trim());
+  if (q.include_examples === false) params.set("include_examples", "false");
+  params.set("sort", q.sort ?? "score");
+  params.set("order", q.order ?? "desc");
+  params.set("limit", "2000");
+  return params.toString();
+}
+
+const json = (body: unknown) => ({ body: JSON.stringify(body) });
+
+export const api = {
+  meta: () => request<Meta>("/meta"),
+  jobs: (q: JobQuery) => request<{ total: number; items: JobSummary[] }>(`/jobs?${jobQueryString(q)}`),
+  job: (id: number) => request<JobDetail>(`/jobs/${id}`),
+  createJob: (body: Partial<JobDetail>) => request<JobSummary>("/jobs", { method: "POST", ...json(body) }),
+  patchJob: (id: number, body: { status?: Stage; notes?: string }) => request<JobSummary>(`/jobs/${id}`, { method: "PATCH", ...json(body) }),
+  deleteJob: (id: number) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
+  openFolder: (id: number) => request<{ opened: string }>(`/jobs/${id}/open-folder`, { method: "POST" }),
+  applications: (states?: string[]) => request<Application[]>(`/applications${states?.length ? "?" + states.map((s) => `state=${s}`).join("&") : ""}`),
+  decide: (id: number, decision: "approve" | "skip") => request<Application>(`/applications/${id}/${decision}`, { method: "POST" }),
+  runs: (limit = 50) => request<Run[]>(`/runs?limit=${limit}`),
+  run: (id: number) => request<Run>(`/runs/${id}`),
+  startRun: (agent: AgentName, options: Record<string, unknown> = {}) => request<Run>(`/runs/${agent}`, { method: "POST", ...json(options) }),
+  answers: () => request<Answer[]>("/answers"),
+  createAnswer: (body: Pick<Answer, "question" | "answer" | "tags">) => request<Answer>("/answers", { method: "POST", ...json(body) }),
+  updateAnswer: (id: number, body: Partial<Pick<Answer, "question" | "answer" | "tags">>) => request<Answer>(`/answers/${id}`, { method: "PUT", ...json(body) }),
+  deleteAnswer: (id: number) => request<void>(`/answers/${id}`, { method: "DELETE" }),
+  settings: () => request<Settings>("/settings"),
+  saveSettings: (body: Partial<Settings>) => request<Settings>("/settings", { method: "PUT", ...json(body) }),
+  tableCounts: () => request<Record<string, number>>("/stats/tables"),
+  system: () => request<SystemInfo>("/system"),
+  seedExamples: () => request<{ added_jobs: number }>("/examples/seed", { method: "POST" }),
+  purgeExamples: () => request<Record<string, number>>("/examples", { method: "DELETE" }),
+};

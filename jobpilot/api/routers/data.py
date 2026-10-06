@@ -90,6 +90,34 @@ def export_json(session: Session = Depends(get_session)) -> Response:
                     headers={"Content-Disposition": f'attachment; filename="jobpilot_{today_ist().isoformat()}.json"'})
 
 
+TABLES = {"jobs": Job, "status_history": StatusHistory, "agent_runs": AgentRun, "applications": Application,
+          "application_fields": ApplicationField, "answers": Answer, "settings": Setting}
+
+
+@router.get("/stats/tables")
+def table_counts(session: Session = Depends(get_session)) -> dict[str, int]:
+    """Row counts for the Database screen."""
+    return {name: session.exec(select(func.count()).select_from(model)).one() for name, model in TABLES.items()}
+
+
+@router.get("/system")
+def system_info() -> dict[str, Any]:
+    """Non-secret configuration for the Settings screen. The API key itself is never returned."""
+    from jobpilot.config import get_config
+    from jobpilot.resume import resume_path
+
+    config = get_config()
+    return {
+        "gemini_model": config.gemini_model,
+        "gemini_fallback_models": config.gemini_fallback_models,
+        "gemini_key_set": bool(config.gemini_api_key),
+        "gemini_rpm": config.gemini_rpm,
+        "legacy_agent_dir": str(config.legacy_agent_dir),
+        "legacy_python": config.legacy_python,
+        "resume_path": str(resume_path()),
+    }
+
+
 @router.post("/examples/seed")
 def seed_examples(session: Session = Depends(get_session)) -> dict[str, int]:
     added = seed(session)
