@@ -67,3 +67,24 @@ Free tier:
   Analytics" label and the company's "About" text are ignored. Roles with no AI/ML component are capped at 70.
 
 On Gemini's free tier, Google may use what you send (your resume and the JDs) to improve its products.
+
+## API (backend for the dashboard)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\run_api.ps1
+```
+
+Interactive docs: http://127.0.0.1:8000/docs. The API listens on 127.0.0.1 only, and it also refuses
+any request that doesn't come from this computer.
+
+- **Pipeline:** `GET /api/meta` (rail counts, applied today vs cap), plus `/api/jobs` with filters (`status`, `source`,
+  `min_score`, `q` full-text search, `include_examples`), sorting and paging. `PATCH /api/jobs/{id}`
+  changes status or notes, and every status change is written to history with actor `user`.
+- **Agents:** `POST /api/runs/{search|score}` starts the agent as a background process and returns its run id.
+  `GET /api/runs/{id}/stream` is a Server-Sent Events stream of its log. It tails the database, so runs started by
+  the scheduler can be watched too. A second start of the same agent is refused while one is running.
+  Each process's console output goes to `data\logs\run_<id>.log`.
+- **Review queue:** `POST /api/applications/{id}/approve` or `/skip` only works while the application is waiting
+  for review. The apply agent (Phase 7) is the only thing that touches the browser.
+- **Other routes:** answers CRUD, settings (validated: threshold 30–95, daily cap 1–40), analytics (funnel, score
+  histogram, applications per day), and CSV/JSON export.

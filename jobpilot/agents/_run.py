@@ -49,14 +49,20 @@ class RunRecorder:
 
 
 @contextmanager
-def agent_run(agent: AgentName, db_url: str | None = None) -> Iterator[RunRecorder]:
+def agent_run(agent: AgentName, db_url: str | None = None, run_id: int | None = None) -> Iterator[RunRecorder]:
+    """run_id: a row the API created already (POST /api/runs/{agent}), so it can stream it at once."""
     with Session(get_engine(db_url)) as session:
-        run = AgentRun(agent=agent, status=RunStatus.running)
+        run = session.get(AgentRun, run_id) if run_id is not None else None
+        if run is None or run.agent != agent:
+            run = AgentRun(agent=agent)
+        run.status, run.started_at = RunStatus.running, utcnow()
         session.add(run)
         session.commit()
-        run_id = run.id
+        run_id, existing = run.id, run.log
 
     recorder = RunRecorder(run_id, db_url)
+    # Append to what the API already wrote, so a client tailing the log never loses a line.
+    recorder.lines = existing.splitlines() if existing else []
     recorder.log(f"{agent.value} run #{run_id} started")
     try:
         yield recorder

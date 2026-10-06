@@ -57,10 +57,10 @@ def run_legacy_search(rec: RunRecorder, legacy_dir: Path, python: str,
 
 
 def run(import_only: bool = False, keywords: list[str] | None = None,
-        sources: list[str] | None = None, db_url: str | None = None) -> None:
+        sources: list[str] | None = None, db_url: str | None = None, run_id: int | None = None) -> None:
     config = get_config()
     legacy_dir = Path(config.legacy_agent_dir)
-    with agent_run(AgentName.search, db_url) as rec:
+    with agent_run(AgentName.search, db_url, run_id) as rec:
         if not import_only:
             stats = run_legacy_search(rec, legacy_dir, config.legacy_python, keywords, sources)
             if stats:
@@ -79,10 +79,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--keywords", nargs="+", help="Override the legacy search keywords for this run")
     parser.add_argument("--sources", nargs="+", help="Override the legacy sources for this run (naukri, linkedin)")
     parser.add_argument("--then-score", action="store_true", help="Run the score agent afterwards (even if search failed)")
+    parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)  # set by the dashboard API
     args = parser.parse_args(argv)
     failed = False
     try:
-        run(args.import_only, args.keywords, args.sources)
+        run(args.import_only, args.keywords, args.sources, run_id=args.run_id)
     except Exception:
         failed = True  # already recorded in agent_runs and printed
     if args.then_score:

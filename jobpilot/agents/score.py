@@ -174,8 +174,9 @@ def score_jobs(session: Session, rec: RunRecorder, client: JSONClient | None, re
         rec.log(f"{failed} job(s) could not be scored (invalid output after one retry); they stay unscored")
 
 
-def run(limit: int = 20, job_id: int | None = None, db_url: str | None = None, client: JSONClient | None = None) -> None:
-    with agent_run(AgentName.score, db_url) as rec:
+def run(limit: int = 20, job_id: int | None = None, db_url: str | None = None, client: JSONClient | None = None,
+        run_id: int | None = None) -> None:
+    with agent_run(AgentName.score, db_url, run_id) as rec:
         resume = load_resume()
         with Session(get_engine(db_url)) as session:
             score_jobs(session, rec, client, resume, limit, job_id)
@@ -185,9 +186,10 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, default=20, help="Max jobs this run (free-tier friendly; default 20)")
     parser.add_argument("--job-id", type=int, help="Score (or re-score) one job")
+    parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)  # set by the dashboard API
     args = parser.parse_args(argv)
     try:
-        run(args.limit, args.job_id)
+        run(args.limit, args.job_id, run_id=args.run_id)
     except Exception:
         sys.exit(1)  # already recorded in agent_runs and printed
 

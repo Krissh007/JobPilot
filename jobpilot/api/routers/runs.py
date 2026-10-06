@@ -1,0 +1,165 @@
+"""
+Agent runs: history, "Run now" (spawns the agent as a subprocess) and a live
+log stream over Server-Sent Events.
+
+The stream tails agent_runs.log in the database rather than the process's
+pipe, so it works the same for runs started by Task Scheduler.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from datetime import timedelta, timezone
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from sqlmodel import Session, select
+
+from jobpilot.api.deps import get_or_404, get_session
+from jobpilot.config import ROOT
+from jobpilot.db.models import AgentName, AgentRun, RunStatus, utcnow
+from jobpilot.db.session import get_engine
+
+router = APIRouter(tags=["runs"])
+
+RUNNABLE = {AgentName.search, AgentName.score}
+COMING = {AgentName.docs: "Phase 6", AgentName.apply: "Phase 7"}
+STALE_AFTER = timedelta(hours=2)  # a "running" row this old with no live process is treated as dead
+LOG_DIR = ROOT / "data" / "logs"
+
+
+class RunOptions(BaseModel):
+    """Whitelisted options only; nothing from the request reaches a shell."""
+    import_only: bool = False      # search
+    then_score: bool = False       # search
+    limit: Optional[int] = Field(None, ge=1, le=500)  # score
+    job_id: Optional[int] = Field(None, ge=1)          # score
+
+
+def build_command(agent: AgentName, run_id: int, options: RunOptions) -> list[str]:
+    command = [sys.executable, "-m", f"jobpilot.agents.{agent.value}", "--run-id", str(run_id)]
+    if agent == AgentName.search:
+        command += ["--import-only"] * options.import_only + ["--then-score"] * options.then_score
+    elif agent == AgentName.score:
+        if options.limit:
+            command += ["--limit", str(options.limit)]
+        if options.job_id:
+            command += ["--job-id", str(options.job_id)]
+    return command
+
+
+def reap(request: Request, session: Session) -> None:
+    """Mark runs whose process died without recording an outcome (e.g. an import error)."""
+    processes: dict[int, subprocess.Popen] = request.app.state.processes
+    for run_id, process in list(processes.items()):
+        code = process.poll()
+        if code is None:
+            continue
+        processes.pop(run_id)
+        run = session.get(AgentRun, run_id)
+        if run is not None and run.status == RunStatus.running:
+            run.status, run.finished_at = RunStatus.error, utcnow()
+            run.error = f"Agent process exited with code {code}; see data/logs/run_{run_id}.log"
+            session.add(run)
+    session.commit()
+
+
+def serialize(run: AgentRun, with_log: bool = False) -> dict[str, Any]:
+    data = run.model_dump(exclude={"log"})
+    data["log_lines"] = run.log.count("\n") + 1 if run.log else 0
+    if with_log:
+        data["log"] = run.log
+    return data
+
+
+@router.get("/runs")
+def list_runs(request: Request, agent: Optional[AgentName] = None, limit: int = 50,
+              session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    reap(request, session)
+    query = select(AgentRun).order_by(AgentRun.started_at.desc()).limit(min(limit, 500))
+    if agent:
+        query = query.where(AgentRun.agent == agent)
+    return [serialize(run) for run in session.exec(query)]
+
+
+@router.get("/runs/{run_id}")
+def get_run(run_id: int, request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
+    reap(request, session)
+    return serialize(get_or_404(session, AgentRun, run_id), with_log=True)
+
+
+@router.post("/runs/{agent}", status_code=202)
+def start_run(agent: AgentName, request: Request, options: RunOptions = RunOptions(),
+              session: Session = Depends(get_session)) -> dict[str, Any]:
+    if agent in COMING:
+        raise HTTPException(501, f"The {agent.value} agent arrives in {COMING[agent]}")
+    reap(request, session)
+    busy = session.exec(select(AgentRun).where(AgentRun.agent == agent, AgentRun.status == RunStatus.running,
+                                               AgentRun.is_example.is_(False))).all()
+    live = [r for r in busy if r.id in request.app.state.processes or utcnow() - _aware(r.started_at) < STALE_AFTER]
+    if live:
+        raise HTTPException(409, {"message": f"A {agent.value} run is already in progress", "run_id": live[0].id})
+
+    run = AgentRun(agent=agent, status=RunStatus.running, log="Starting...")
+    session.add(run)
+    session.commit()
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+    if request.app.state.db_url:
+        env["DATABASE_URL"] = request.app.state.db_url
+    with open(LOG_DIR / f"run_{run.id}.log", "w", encoding="utf-8") as console:
+        process = subprocess.Popen(
+            build_command(agent, run.id, options), cwd=ROOT, env=env, stdout=console, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    request.app.state.processes[run.id] = process
+    return serialize(run)
+
+
+def _aware(value):
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _snapshot(db_url: str | None, run_id: int) -> tuple[str, str, str] | None:
+    with Session(get_engine(db_url)) as session:
+        run = session.get(AgentRun, run_id)
+        return (run.log, run.status.value, run.error) if run else None
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run(run_id: int, request: Request) -> StreamingResponse:
+    """SSE: one `log` event per new log line, then `end` with the outcome."""
+    db_url = request.app.state.db_url
+    poll = getattr(request.app.state, "sse_poll_seconds", 1.0)
+    if _snapshot(db_url, run_id) is None:
+        raise HTTPException(404, f"run {run_id} not found")
+
+    async def events():
+        sent, idle = 0, 0.0
+        while True:
+            if await request.is_disconnected():
+                return
+            log, status, error = await asyncio.to_thread(_snapshot, db_url, run_id)
+            lines = log.splitlines() if log else []
+            for line in lines[sent:]:
+                yield f"event: log\ndata: {json.dumps(line)}\n\n"
+                idle = 0.0
+            sent = max(sent, len(lines))
+            if status != RunStatus.running.value:
+                yield f"event: end\ndata: {json.dumps({'status': status, 'error': error})}\n\n"
+                return
+            idle += poll
+            if idle >= 15:
+                yield ": keep-alive\n\n"
+                idle = 0.0
+            await asyncio.sleep(poll)
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

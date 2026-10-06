@@ -8,8 +8,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 | 1 DB + migrations + seed | ✅ done | See below |
 | 2 Search integration | ✅ done | See below |
 | 3 Scorer | ✅ done, verified with a real run | 149/150 real jobs scored with gemini-3.5-flash-lite + prompt v3 |
-| 4 FastAPI + pytest | ⏳ next | |
-| 5 Dashboard UI | — | 2 visual directions first |
+| 4 FastAPI + pytest | ✅ done, verified with a real run | 31 operations, live on the real DB |
+| 5 Dashboard UI | ⏳ next | 2 visual directions first |
 | 6 Docs generator | — | Reuses legacy `src/tailoring` |
 | 7 Auto-apply + review queue | — | LinkedIn, then Naukri (pre-check → approve → apply) |
 | 8 Scheduler | — | Windows Task Scheduler, 08–20 IST every 4 h |
@@ -69,3 +69,24 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 - Real backfill (run #16): 146 jobs in 18 min, 0 failures, 0 retries. Result: 45 shortlisted, 100 found, 5 applied. 1 job has no usable JD.
   Score histogram: 10s:4, 20s:12, 30s:9, 40s:16, 50s:59, 60s:16, 70s:24, 80s:4, 90s:5. 19 jobs are AI-centred (domain ≥ 75).
   Spot-checked top scores (RSA, Sutherland "Agentic AI BA", Amazon, Infor): the AI work is in the responsibilities themselves.
+
+## Phase 4: FastAPI (2026-10-06)
+- `jobpilot/api/`: `create_app(db_url)` and 7 routers (data/meta, jobs, applications, runs, answers, settings, analytics). There are 31 operations.
+  Requests from other machines are refused. CORS allows the Vite dev server (localhost:5173).
+- Run now: `POST /api/runs/{agent}` creates the run row first, then starts `python -m jobpilot.agents.<agent> --run-id N`
+  as a hidden subprocess. Options are whitelisted, so nothing from a request reaches a shell.
+  - A second start of a running agent is refused (409). A "running" row older than 2 h with no live process doesn't block.
+  - A process that dies without recording an outcome is marked `error`, with a pointer to its console log.
+- SSE: `GET /api/runs/{id}/stream` polls the run's log in the DB every second. It sends `log` events, then `end`, with a keep-alive every 15 s.
+- Deferred to Phase 7: `POST /jobs/{id}/queue-apply`, because its states depend on the apply agent's design.
+- Bugs found and fixed:
+  1. `?state=` was ignored on `/api/applications`. FastAPI treated the list as a request body.
+  2. The SSE stream dropped the agent's first line. The agent overwrote the API's "Starting..." log instead of appending.
+  3. Funnel off by one. My prompt-tuning resets had left shortlisted→found churn in history for jobs #74, #79 and #87; it was removed.
+- Real run (server on 127.0.0.1:8000, real DB):
+  - Meta: 165 jobs (15 examples).
+  - Top shortlisted: RSA 96, Infor 90, Sutherland 90.
+  - Search "agentic" returns 11 hits.
+  - Real-only funnel: 150 → 50 → 5 → 5. Export: 165 rows.
+  - Runs #17 (score) and #18 (search import) were started through the API and streamed to `end: ok`. A double start returned 409. Apply returns 501 until Phase 7.
+- Tests: 60 passed, including a real subprocess run streamed end to end, a crashed process marked error, and the remote-client 403.
