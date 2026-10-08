@@ -118,6 +118,22 @@ def system_info() -> dict[str, Any]:
     }
 
 
+@router.get("/review/weekly")
+def weekly_review(session: Session = Depends(get_session)) -> dict[str, Any]:
+    from jobpilot.weekly import status
+
+    return status(session)
+
+
+@router.post("/review/weekly/done")
+def weekly_review_done(session: Session = Depends(get_session)) -> dict[str, Any]:
+    from jobpilot.weekly import mark_reviewed, status
+
+    mark_reviewed(session)
+    session.commit()
+    return status(session)
+
+
 @router.post("/examples/seed")
 def seed_examples(session: Session = Depends(get_session)) -> dict[str, int]:
     added = seed(session)

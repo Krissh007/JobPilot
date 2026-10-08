@@ -36,6 +36,8 @@ def main() -> int:
     parser.add_argument("--debug-dir", required=True, help="Where sources may dump pages when a search returns 0 jobs")
     parser.add_argument("--keywords", nargs="+")
     parser.add_argument("--sources", nargs="+")
+    parser.add_argument("--linkedin-easy-apply-only", action="store_true",
+                        help="Add LinkedIn's Easy Apply filter (f_AL=true) to its search URL, in memory only")
     args = parser.parse_args()
 
     root = Path(args.legacy_dir).resolve()
@@ -43,6 +45,13 @@ def main() -> int:
 
     from src.config import Settings, validate_model
     from src.pipelines.discovery_pipeline import RunStats, discover_jobs, load_context, score_jobs
+
+    if args.linkedin_easy_apply_only:
+        # Wrap (not edit) the legacy URL builder: same search, plus LinkedIn's own Easy Apply filter.
+        from src.sources.linkedin_source import LinkedInSource
+
+        original = LinkedInSource.search_url
+        LinkedInSource.search_url = lambda self, *a, **k: original(self, *a, **k) + "&f_AL=true"
 
     context = load_context(root)
     data = context.settings.model_dump()

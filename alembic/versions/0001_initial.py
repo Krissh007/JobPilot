@@ -8,7 +8,6 @@ from alembic import op
 import sqlalchemy as sa
 
 from jobpilot.db.models import (
-    DEFAULT_SETTINGS,
     Actor,
     AgentName,
     ApplicationState,
@@ -131,7 +130,13 @@ def upgrade() -> None:
         sa.Column("key", sa.String, primary_key=True),
         sa.Column("value", sa.JSON, nullable=False),
     )
-    op.bulk_insert(settings, [{"key": k, "value": v} for k, v in DEFAULT_SETTINGS.items()])
+    # Frozen copy of the defaults at 0001 (later settings arrive in later migrations).
+    op.bulk_insert(settings, [
+        {"key": "threshold", "value": 60},
+        {"key": "daily_apply_cap", "value": 10},
+        {"key": "search_queries", "value": ["AI Business Analyst", "AI Product Analyst", "Business Analyst", "Product Analyst"]},
+        {"key": "schedule", "value": {"every_hours": 4, "start": "08:00", "end": "22:00", "timezone": "Asia/Kolkata"}},
+    ])
 
     op.create_table(
         "llm_cache",

@@ -10,6 +10,7 @@ export const useRuns = () => useQuery({ queryKey: ["runs"], queryFn: () => api.r
 export const useAnswers = () => useQuery({ queryKey: ["answers"], queryFn: api.answers });
 export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: api.settings });
 export const useSystem = () => useQuery({ queryKey: ["system"], queryFn: api.system });
+export const useWeekly = () => useQuery({ queryKey: ["weekly"], queryFn: api.weekly, refetchInterval: 60000 });
 export const useTableCounts = () => useQuery({ queryKey: ["tables"], queryFn: api.tableCounts, refetchInterval: 10000 });
 
 /** Status move with an optimistic update so drag-and-drop feels instant. */

@@ -35,7 +35,8 @@ RESULT_PREFIX = "JOBPILOT_RESULT "
 
 
 def run_legacy_search(rec: RunRecorder, legacy_dir: Path, python: str, known_urls: list[str],
-                      keywords: list[str] | None, sources: list[str] | None) -> tuple[dict | None, list[dict[str, Any]]]:
+                      keywords: list[str] | None, sources: list[str] | None,
+                      easy_apply_only: bool = False) -> tuple[dict | None, list[dict[str, Any]]]:
     """Run the shim; returns (legacy stats, matched job dicts)."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     known_file = DATA_DIR / "known_urls.json"
@@ -47,7 +48,10 @@ def run_legacy_search(rec: RunRecorder, legacy_dir: Path, python: str, known_url
         command += ["--keywords", *keywords]
     if sources:
         command += ["--sources", *sources]
-    rec.log(f"Running legacy discovery ({len(known_urls)} known URLs skipped)")
+    if easy_apply_only:
+        command += ["--linkedin-easy-apply-only"]
+    rec.log(f"Running legacy discovery ({len(known_urls)} known URLs skipped"
+            + ("; LinkedIn: Easy Apply jobs only" if easy_apply_only else "") + ")")
 
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
     process = subprocess.Popen(command, cwd=legacy_dir, env=env, stdout=subprocess.PIPE,
@@ -80,7 +84,8 @@ def run(import_legacy_db: bool = False, keywords: list[str] | None = None,
                 known = list(session.exec(select(Job.url)))
                 keywords = keywords or get_setting(session, "search_queries")  # Settings screen is the source of truth
                 rec.log(f"Keywords: {', '.join(keywords)}")
-                stats, jobs = run_legacy_search(rec, legacy_dir, config.legacy_python, known, keywords, sources)
+                stats, jobs = run_legacy_search(rec, legacy_dir, config.legacy_python, known, keywords, sources,
+                                                bool(get_setting(session, "linkedin_easy_apply_only")))
                 if stats:
                     rec.log(f"Legacy stats: discovered {stats['discovered']}, stale {stats['stale']}, "
                             f"rejected by gates {stats['rejected']}, matched {stats['matched']}")

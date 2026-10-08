@@ -122,7 +122,15 @@ def generate_one(job: Job, resume: Resume, client: Any, session: Session, log) -
     raw = cache_get(session, key)
     origin = "cache"
     if raw is None:
-        raw = client.generate_json(tailor.SYSTEM_PROMPT, tailor.build_prompt(legacy_job, resume.text))
+        prompt = tailor.build_prompt(legacy_job, resume.text)
+        try:
+            raw = client.generate_json(tailor.SYSTEM_PROMPT, prompt)
+        except (QuotaExhausted, LLMConfigError):
+            raise
+        except LLMError as error:  # bad JSON: one retry that names the problem
+            log(f"      retrying once: {str(error).splitlines()[0][:120]}")
+            retry = f"{prompt}\n\nYour previous reply was not valid JSON ({error}). Return only the JSON object."
+            raw = client.generate_json(tailor.SYSTEM_PROMPT, retry)
         origin = "gemini"
     try:
         application = tailor.TailoredApplication.model_validate(raw)
@@ -150,9 +158,11 @@ def generate_one(job: Job, resume: Resume, client: Any, session: Session, log) -
     slug = generator.slug
     folder = OUTPUT_DIR / f"{slug(job.company, 30)}_{job.id}"
     person = slug(application.candidate.name or "Candidate", 30)
-    resume_file = docx_writer.write_resume(application, folder / f"{person}_Resume_{slug(job.company, 30)}.docx", job.title)
+    # Word's title property is capped at 255 chars, and some postings have very long titles.
+    short_title = job.title if len(job.title) <= 120 else job.title[:117].rstrip() + "..."
+    resume_file = docx_writer.write_resume(application, folder / f"{person}_Resume_{slug(job.company, 30)}.docx", short_title)
     letter_file = docx_writer.write_cover_letter(application, folder / f"{person}_Cover_Letter_{slug(job.company, 30)}.docx",
-                                                 job.company, job.title)
+                                                 job.company, short_title)
     generator.DocumentGenerator._write_report({**legacy_job, "job_url": job.url}, application, folder / "match_report.md")
     return {"resume": resume_file, "cover": letter_file, "coverage": application.keyword_coverage,
             "warnings": application.fact_check_warnings, "missing": application.missing_keywords, "origin": origin}
@@ -174,7 +184,7 @@ def make_documents(session: Session, rec: RunRecorder, client: Any, resume: Resu
             session.commit()
             rec.log(f"Stopping: Gemini quota/config problem; {len(jobs) - rec.processed + 1} job(s) left for the next run")
             raise
-        except (DocsError, LLMError, OSError) as error:
+        except Exception as error:  # one bad job must not stop the run (quota/config errors are re-raised above)
             failures += 1
             session.rollback()
             rec.log(f"  #{job.id} {job.title} | {job.company}: SKIPPED, {error}")

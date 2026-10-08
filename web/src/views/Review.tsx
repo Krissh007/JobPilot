@@ -15,12 +15,18 @@ function Card({ app, threshold }: { app: Application; threshold: number }) {
     onError: (e: Error) => toast(e.message),
   });
   const flagged = app.needs_review;
+  const incomplete = app.reason === "incomplete";
   return (
     <Panel
       title={<span className="flex items-center gap-2">{app.job?.title} · {app.job?.company} <ScoreNum score={app.job?.score ?? null} threshold={threshold} />{app.is_example && <ExampleTag />}</span>}
       actions={<span className="text-[12px] text-muted">paused {ago(app.created_at)} ago</span>}>
       <div className="grid gap-4 p-3.5 lg:grid-cols-[1.25fr_1fr]">
         <div className="flex min-w-0 flex-col gap-3">
+          {incomplete && (
+            <div role="note" className="rounded-md border border-warn/40 bg-warn-soft p-2.5 text-[12.5px]">
+              <b className="text-warn">Not ready to submit.</b> The form is stuck before LinkedIn's Submit page: the highlighted rows need you (consent boxes are never ticked by the agent). Finish them in the agent's Chrome window. Approve unlocks once the form reaches Submit, or submit it there yourself and JobPilot records it.
+            </div>
+          )}
           <p className="m-0 text-[12.5px] text-muted">
             {flagged ? <b className="text-warn">{flagged} answer{flagged > 1 ? "s" : ""} drafted by Gemini need your eye (highlighted).</b> : "Every answer came from your resume or answer bank."}
           </p>
@@ -40,7 +46,7 @@ function Card({ app, threshold }: { app: Application; threshold: number }) {
             </table>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <Button variant="primary" disabled={decide.isPending} onClick={() => decide.mutate("approve")}>Approve submit</Button>
+            <Button variant="primary" disabled={decide.isPending || incomplete} title={incomplete ? "Finish the form in the browser window first" : undefined} onClick={() => decide.mutate("approve")}>Approve submit</Button>
             <Button disabled={decide.isPending} onClick={() => decide.mutate("skip")}>Skip</Button>
             {app.job && <Button variant="ghost" onClick={() => openJob(app.job!.id)}>Open job</Button>}
           </div>
@@ -64,8 +70,8 @@ export function Review({ threshold }: { threshold: number }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="m-0 text-[12.5px] text-muted">The apply agent fills each form, saves a screenshot and <b className="text-fg">stops before Submit</b>. Approve here and it submits in the same browser tab. Skip drops it. Nothing is ever submitted without your click.</p>
-      {pending.length ? pending.map((a) => <Card key={a.id} app={a} threshold={threshold} />) : <Empty title="Nothing waiting for review">Paused applications appear here once the apply agent (Phase 7) runs.</Empty>}
+      <p className="m-0 text-[12.5px] text-muted">The apply agent fills each form, saves a screenshot and <b className="text-fg">stops before Submit</b>. Approve here and it submits in the same browser tab, as long as it is still holding the form open. Skip drops it. Applications land here when auto-submit is off, Gemini drafted an answer, or a required field is empty.</p>
+      {pending.length ? pending.map((a) => <Card key={a.id} app={a} threshold={threshold} />) : <Empty title="Nothing waiting for review">Use <b>Queue for apply</b> on a job, or <b>Run now</b> on the Apply card in Runs.</Empty>}
       {blocked.length > 0 && (
         <Panel title={<span className="text-bad">Blocked: needs you</span>}>
           <ul className="m-0 list-none p-0">
@@ -85,7 +91,7 @@ export function Review({ threshold }: { threshold: number }) {
             {decided.map((a) => (
               <tr key={a.id} className="border-b border-line last:border-0">
                 <td className="px-3.5 py-1.5">{a.job?.title} · {a.job?.company}</td>
-                <td className="px-3.5 py-1.5"><span className={cx("rounded px-1.5 text-[11px] font-semibold", a.state === "skipped" ? "bg-sunk text-muted" : "bg-good-soft text-good")}>{a.state}</span></td>
+                <td className="px-3.5 py-1.5"><span className={cx("rounded px-1.5 text-[11px] font-semibold", a.state === "skipped" ? "bg-sunk text-muted" : "bg-good-soft text-good")}>{a.state}</span>{a.reason && <span className="ml-1.5 text-[11.5px] text-muted">{a.reason.replace(/_/g, " ")}</span>}</td>
                 <td className="num px-3.5 py-1.5 text-right text-muted">{when(a.decided_at)}</td>
               </tr>
             ))}

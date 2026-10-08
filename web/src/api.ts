@@ -29,14 +29,14 @@ export interface HistoryRow { from_status: Stage | null; to_status: Stage; chang
 export interface JobDetail extends JobSummary {
   url: string; jd_text: string; score_reason: string; notes: string; resume_version: string;
   docs: { resume: boolean; cover: boolean; report: boolean; folder: string | null };
-  applications: { id: number; state: string; created_at: string; decided_at: string | null }[];
+  applications: { id: number; state: string; created_at: string; decided_at: string | null; reason: string }[];
   history: HistoryRow[];
 }
 
 export interface AppField { id: number; step: number; field_name: string; value_used: string; source: "resume" | "answer_bank" | "llm"; needs_review: boolean }
 export interface Application {
   id: number; job_id: number; state: "filling" | "pending_review" | "approved" | "submitted" | "skipped" | "blocked";
-  screenshot_path: string; has_screenshot: boolean; created_at: string; decided_at: string | null; is_example: boolean;
+  screenshot_path: string; has_screenshot: boolean; created_at: string; decided_at: string | null; is_example: boolean; reason: string;
   job: { id: number; title: string; company: string; score: number | null; source: string; url: string } | null;
   fields: AppField[]; needs_review: number;
 }
@@ -52,6 +52,15 @@ export interface Answer { id: number; question: string; answer: string; tags: st
 export interface Settings {
   threshold: number; daily_apply_cap: number; search_queries: string[];
   schedule: { every_hours: number; start: string; end: string; timezone: string };
+  auto_submit: boolean; review_wait_minutes: number; linkedin_easy_apply_only: boolean;
+  weekly_review: { day: string; time: string }; answers_reviewed_at: string | null;
+}
+
+export interface WeeklyReview {
+  due: boolean; due_at: string; next_due_at: string; reviewed_at: string | null;
+  open_questions: { id: number; question: string; created_at: string }[];
+  new_this_week: { id: number; question: string; answered: boolean }[];
+  total_answers: number;
 }
 
 export interface SystemInfo {
@@ -114,6 +123,8 @@ export const api = {
   deleteAnswer: (id: number) => request<void>(`/answers/${id}`, { method: "DELETE" }),
   settings: () => request<Settings>("/settings"),
   saveSettings: (body: Partial<Settings>) => request<Settings>("/settings", { method: "PUT", ...json(body) }),
+  weekly: () => request<WeeklyReview>("/review/weekly"),
+  weeklyDone: () => request<WeeklyReview>("/review/weekly/done", { method: "POST" }),
   tableCounts: () => request<Record<string, number>>("/stats/tables"),
   system: () => request<SystemInfo>("/system"),
   seedExamples: () => request<{ added_jobs: number }>("/examples/seed", { method: "POST" }),

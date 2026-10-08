@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from jobpilot.api.deps import get_or_404, get_session
-from jobpilot.db.models import Application, ApplicationField, ApplicationState, Job, utcnow
+from jobpilot.db.models import AgentName, AgentRun, Application, ApplicationField, ApplicationState, Job, RunStatus, utcnow
 
 router = APIRouter(tags=["applications"])
 
@@ -60,6 +60,14 @@ def decide(app_id: int, to: ApplicationState, session: Session) -> dict[str, Any
     app = get_or_404(session, Application, app_id)
     if app.state != ApplicationState.pending_review:
         raise HTTPException(409, f"Application {app_id} is '{app.state.value}', not waiting for review")
+    if to == ApplicationState.approved and app.reason == "incomplete":
+        raise HTTPException(409, "This form isn't on its Submit page yet. Finish the missing steps in the agent's browser "
+                                 "window; Approve unlocks once it reaches Submit, or submit it there yourself.")
+    if to == ApplicationState.approved and not app.is_example:
+        waiting = session.exec(select(AgentRun).where(AgentRun.agent == AgentName.apply, AgentRun.status == RunStatus.running)).first()
+        if waiting is None:
+            # Approval only means something while the agent holds the filled form open in its tab.
+            raise HTTPException(409, "The apply agent is no longer holding this form open. Use 'Queue for apply' on the job to fill it again.")
     app.state, app.decided_at = to, utcnow()
     session.add(app)
     session.commit()

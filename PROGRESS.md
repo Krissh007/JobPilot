@@ -143,3 +143,31 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - RSA America (96) was skipped because you moved it to Applied from the dashboard at 15:43 IST.
   - flash-lite's cover letters run about 215 words, under the legacy prompt's 250–350 target.
 - Tests: 68 passed. New: real legacy tailoring with a fake Gemini, covering invented skill and number removed, old dates corrected, unknown title writes nothing, cache, company-name variants, and selection.
+
+
+## Phase 7: apply agent + review queue (2026-10-08)
+- Your rules:
+  - Auto-submit only when every field came from your resume/profile or the answer bank, the job is Docs-ready and scores at least the threshold. A Gemini draft, an empty field or a consent box sends it to Review.
+  - The Settings switch is **OFF** until you've checked a real run.
+  - Weekly answer review: Mondays 09:00 IST (dashboard banner + Windows toast via `python -m jobpilot.weekly`; scheduled in Phase 8).
+- Sign-in: LinkedIn is signed in, in the persistent profile (`li_at` cookie present). Naukri isn't signed in yet, so the Naukri adapter waits.
+- Answer bank: imported from the legacy `application_profile.yaml`: 6 answers + 5 open questions for you (expected CTC, relocation, work authorization ×2, years of experience).
+- `jobpilot/agents/apply/`:
+  - The legacy `EasyApplyFiller` is subclassed so every field records its source (resume / answer bank / Gemini draft).
+  - Headed installed Chrome, one tab, 20–90 s random pauses, daily cap.
+  - CAPTCHA, checkpoint or login wall: the application is marked blocked, you get a toast, and the run stops.
+  - Not-Easy-Apply jobs are remembered (`applications.reason`, migration 0003) and never opened again.
+- Search: a new **LinkedIn Easy Apply only** setting (on) adds LinkedIn's own `f_AL=true` filter.
+- The first live test found all 11 Docs-ready LinkedIn jobs were "Apply on company website". The drawer now says "External apply" for those.
+- Real review-mode run #44 (job #190 HighRadius, score 58):
+  - Filled 6 fields (5 resume/profile, 1 answer bank) and took a screenshot. Nothing was submitted; the 20-minute wait timed out.
+  - The form was actually stuck on page 4/5 on a **required data-consent checkbox**, but the log said "stopped before Submit". Fixed:
+    - The agent never ticks, chooses or answers consent/terms/privacy questions, even if the answer bank has one. They're listed as "(not ticked: only you can agree to this)".
+    - A form that isn't on LinkedIn's Submit page is marked `incomplete`. The log says "form NOT ready: stuck on step N … Needs you: …".
+    - For an incomplete form, Approve is refused by the API (409) and disabled in Review, with an amber note.
+    - If you finish the steps yourself in the agent's window, the agent notices the Submit page and unlocks Approve. If you submit there yourself, it records the application.
+- Tests: 84 passed. The new apply tests run a fake LinkedIn form in headless Chrome and cover:
+  - auto-submit, draft → review → approve, review-only never submits
+  - open question, consent box never ticked + Approve refused until you finish
+  - security block, not signed in, daily cap, broken page, not-Easy-Apply remembered
+- Still open: the 5 open answers (yours); Naukri after you sign in; turning auto-submit on (your call).

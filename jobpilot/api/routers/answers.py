@@ -22,7 +22,7 @@ class AnswerIn(BaseModel):
 
 class AnswerPatch(BaseModel):
     question: Optional[str] = Field(None, min_length=2)
-    answer: Optional[str] = Field(None, min_length=1)
+    answer: Optional[str] = None  # "" turns it back into an open question
     tags: Optional[str] = None
 
 
@@ -44,7 +44,10 @@ def create_answer(body: AnswerIn, session: Session = Depends(get_session)) -> An
 def update_answer(answer_id: int, body: AnswerPatch, session: Session = Depends(get_session)) -> Answer:
     answer = get_or_404(session, Answer, answer_id)
     for key, value in body.model_dump(exclude_none=True).items():
-        setattr(answer, key, value)
+        setattr(answer, key, value.strip() if isinstance(value, str) else value)
+    if body.answer is not None:  # keep the needs-answer tag in step with whether there is an answer
+        tags = [t.strip() for t in answer.tags.split(",") if t.strip() and t.strip() != "needs-answer"]
+        answer.tags = ", ".join(tags + ([] if answer.answer else ["needs-answer"]))
     answer.updated_at = utcnow()
     session.add(answer)
     session.commit()

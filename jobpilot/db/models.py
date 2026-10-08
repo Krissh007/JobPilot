@@ -140,6 +140,8 @@ class Application(SQLModel, table=True):
     screenshot_path: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     decided_at: Optional[datetime] = None
+    # Why it ended as it did: not_easy_apply, skipped_by_you, timeout, failed, blocked, tab_closed ...
+    reason: str = ""
     is_example: bool = False
 
 
@@ -191,4 +193,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "daily_apply_cap": 10,
     "search_queries": ["AI Business Analyst", "AI Product Analyst", "Business Analyst", "Product Analyst"],
     "schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "timezone": "Asia/Kolkata"},
+    # Apply agent. Auto-submit stays off until you switch it on (Settings), and even then only for
+    # docs_ready jobs >= threshold whose every field came from your resume/profile or answer bank.
+    "auto_submit": False,
+    "review_wait_minutes": 20,
+    # Weekly review of the answer bank (open questions + questions forms asked that week).
+    "weekly_review": {"day": "mon", "time": "09:00"},
+    "answers_reviewed_at": None,
+    # Search LinkedIn with its Easy Apply filter (other LinkedIn jobs can't be applied to by the agent).
+    "linkedin_easy_apply_only": True,
 }

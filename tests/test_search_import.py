@@ -132,7 +132,11 @@ FAKE_SHIM = r"""
 import json, sys
 args = sys.argv
 known = json.load(open(args[args.index("--known-urls") + 1], encoding="utf-8"))
-print("INFO | naukri returned 2 jobs | keywords=" + "|".join(args[args.index("--keywords") + 1:]))
+kw = []
+for a in args[args.index("--keywords") + 1:]:
+    if a.startswith("--"): break
+    kw.append(a)
+print("INFO | naukri returned 2 jobs | keywords=" + "|".join(kw) + (" | easy-apply-only" if "--linkedin-easy-apply-only" in args else ""))
 jobs = [
     {"job_url": "https://www.naukri.com/job-listings-ai-ba-zeta-150926500101", "title": "AI Business Analyst",
      "company": "Zeta", "source": "naukri", "location": "Hyderabad", "description": "LLM requirements " * 20,
@@ -164,10 +168,10 @@ def test_search_streams_matches_into_jobpilot_db_only(tmp_path, db_url, monkeypa
     assert set(jobs) == {"Zeta", "Eta"} and jobs["Zeta"].legacy_score == 71.0 and jobs["Zeta"].exp_max == 5
     assert jobs["Zeta"].status == JobStatus.found and len(jobs["Zeta"].jd_text) > 100
     assert (run.found, run.processed) == (2, 2)
-    assert "[legacy] INFO | naukri returned 2 jobs | keywords=AI Business Analyst|AI Product Analyst|Business Analyst|Product Analyst" in run.log and "rejected by gates 4, matched 2" in run.log
+    assert "[legacy] INFO | naukri returned 2 jobs | keywords=AI Business Analyst|AI Product Analyst|Business Analyst|Product Analyst | easy-apply-only" in run.log and "rejected by gates 4, matched 2" in run.log
     assert not list(legacy.iterdir())  # nothing written into the legacy project
 
     search.run(db_url=db_url)  # second run: JobPilot passes its URLs, so the shim skips them
     with Session(get_engine(db_url)) as s:
         last = s.exec(select(AgentRun).order_by(AgentRun.id.desc())).first()
-    assert (last.found, last.processed) == (0, 0) and "Running legacy discovery (2 known URLs skipped)" in last.log
+    assert (last.found, last.processed) == (0, 0) and "Running legacy discovery (2 known URLs skipped; LinkedIn: Easy Apply jobs only)" in last.log

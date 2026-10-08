@@ -9,6 +9,10 @@ openpyxl>=3.1
 python-docx>=1.1
 PyYAML>=6
 
+# Phase 7: apply agent (uses your installed Chrome, no browser download) + Windows toasts
+playwright>=1.45
+win11toast>=0.35
+
 # Phase 4: API
 fastapi>=0.115
 uvicorn>=0.30

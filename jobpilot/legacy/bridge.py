@@ -32,6 +32,14 @@ def tailoring() -> tuple[ModuleType, ModuleType, ModuleType]:
     return tailor, docx_writer, generator
 
 
+def easy_apply() -> ModuleType:
+    """The legacy LinkedIn Easy Apply filler (needs only Playwright)."""
+    _ensure_path()
+    from src.apply import easy_apply as module
+
+    return module
+
+
 def load_master_resume(path: Path) -> str:
     """Plain text of a .docx/.pdf/.md/.txt resume, read exactly as the legacy tailoring reads it."""
     _ensure_path()

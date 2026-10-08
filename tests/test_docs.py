@@ -150,3 +150,32 @@ def test_examples_and_unshortlisted_jobs_are_not_selected(db_url, setup):
         upsert_job(s, {"title": "Ex", "company": "Example Co", "url": "https://example.com/x", "jd_text": "x" * 400, "is_example": True})
         s.commit()
         assert [j.id for j in docs.select_jobs(s, 10, None)] == [setup]
+
+
+def test_bad_json_retried_once_and_long_titles_ok(db_url, setup):
+    from jobpilot.llm.gemini import LLMError
+
+    class Flaky(FakeClient):
+        def generate_json(self, system, prompt):
+            self.calls += 1
+            if self.calls == 1:
+                raise LLMError("Model did not return valid JSON: Expecting value")
+            assert "not valid JSON" in prompt
+            return copy.deepcopy(GOOD)
+
+    with Session(get_engine(db_url)) as s:
+        job = s.get(Job, setup)
+        job.title = "FY27 | USI | Audit and Assurance | " + "Associate Senior Assistant, Product Strategy & Management " * 5
+        s.add(job)
+        s.commit()
+    client = Flaky()
+    docs.run(db_url=db_url, client=client)
+    assert client.calls == 2 and get_job(db_url, setup).status == JobStatus.docs_ready
+
+
+def test_unexpected_error_skips_job_not_run(db_url, setup, monkeypatch):
+    monkeypatch.setattr(docs, "generate_one", lambda *a, **k: (_ for _ in ()).throw(ValueError("boom")))
+    docs.run(db_url=db_url, client=FakeClient())
+    with Session(get_engine(db_url)) as s:
+        run = s.exec(select(AgentRun)).one()
+    assert run.status == RunStatus.ok and "SKIPPED, boom" in run.log

@@ -116,7 +116,7 @@ def get_job(job_id: int, session: Session = Depends(get_session)) -> dict[str, A
             "report": folder is not None and (folder / "match_report.md").is_file(),
             "folder": str(folder) if folder else None,
         },
-        "applications": [{"id": a.id, "state": a.state, "created_at": a.created_at, "decided_at": a.decided_at} for a in apps],
+        "applications": [{"id": a.id, "state": a.state, "created_at": a.created_at, "decided_at": a.decided_at, "reason": a.reason} for a in apps],
         "history": history(job_id, session),
     }
 

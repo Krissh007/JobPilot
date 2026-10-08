@@ -1,9 +1,51 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Answer } from "../api";
-import { useAnswers } from "../data";
+import { useAnswers, useWeekly } from "../data";
 import { useUI } from "../state";
-import { Button, Empty, ExampleTag, Panel, inputClass, labelClass } from "../ui";
+import { Button, Empty, ExampleTag, Panel, cx, inputClass, labelClass, when } from "../ui";
+
+function OpenQuestion({ id, question }: { id: number; question: string }) {
+  const { toast } = useUI();
+  const qc = useQueryClient();
+  const [value, setValue] = useState("");
+  const save = useMutation({
+    mutationFn: () => api.updateAnswer(id, { answer: value }),
+    onSuccess: () => { toast("Answer saved"); qc.invalidateQueries({ queryKey: ["answers"] }); qc.invalidateQueries({ queryKey: ["weekly"] }); },
+    onError: (e: Error) => toast(e.message),
+  });
+  return (
+    <li className="grid grid-cols-1 items-center gap-2 border-b border-line px-3.5 py-2 last:border-0 sm:grid-cols-[1fr_260px_auto]">
+      <span className="font-medium">{question}</span>
+      <input aria-label={`Answer for ${question}`} value={value} onChange={(e) => setValue(e.target.value)} placeholder="Your answer" className={inputClass} />
+      <Button size="sm" variant="primary" disabled={!value.trim() || save.isPending} onClick={() => save.mutate()}>Save</Button>
+    </li>
+  );
+}
+
+function WeeklyReviewPanel() {
+  const { data: weekly } = useWeekly();
+  const { toast } = useUI();
+  const qc = useQueryClient();
+  const done = useMutation({
+    mutationFn: api.weeklyDone,
+    onSuccess: () => { toast("Marked reviewed. Next review " + when(weekly?.next_due_at)); qc.invalidateQueries({ queryKey: ["weekly"] }); },
+  });
+  if (!weekly) return null;
+  return (
+    <Panel title={<span className="flex items-center gap-2">Weekly review <span className={cx("rounded px-1.5 text-[11px] font-semibold", weekly.due ? "bg-warn-soft text-warn" : "bg-good-soft text-good")}>{weekly.due ? "due" : "done"}</span></span>}
+      actions={<span className="text-[12px] text-muted">{weekly.due ? `due since ${when(weekly.due_at)}` : `next ${when(weekly.next_due_at)}`}</span>}>
+      <div className="flex flex-col gap-2 p-3.5 text-[12.5px]">
+        <p className="m-0 text-muted">Every Monday 09:00: answer the open questions forms asked, and skim the answers below. A job auto-submits only when every field comes from your resume or these answers.</p>
+        {weekly.open_questions.length > 0
+          ? <ul className="m-0 list-none rounded-md border border-warn/40 bg-warn-soft/40 p-0">{weekly.open_questions.map((q) => <OpenQuestion key={q.id} id={q.id} question={q.question} />)}</ul>
+          : <p className="m-0 text-good">No open questions.</p>}
+        {weekly.new_this_week.length > 0 && <p className="m-0 text-muted">New this week: {weekly.new_this_week.map((q) => q.question).join(" · ")}</p>}
+        <div><Button variant={weekly.due ? "primary" : "default"} disabled={done.isPending} onClick={() => done.mutate()}>Mark reviewed</Button></div>
+      </div>
+    </Panel>
+  );
+}
 
 function Row({ a }: { a: Answer }) {
   const { toast } = useUI();
@@ -24,9 +66,9 @@ function Row({ a }: { a: Answer }) {
     </tr>
   );
   return (
-    <tr className="border-b border-line last:border-0">
+    <tr className={cx("border-b border-line last:border-0", !a.answer && "bg-warn-soft/50")}>
       <td className="px-3 py-2 font-semibold">{a.question} {a.is_example && <ExampleTag />}</td>
-      <td className="px-3 py-2">{a.answer}</td>
+      <td className="px-3 py-2">{a.answer || <span className="font-medium text-warn">open question: needs your answer</span>}</td>
       <td className="px-3 py-2">{a.tags.split(",").filter((t) => t.trim()).map((t) => <span key={t} className="mr-1 rounded bg-sunk px-1.5 text-[11.5px] text-muted">{t.trim()}</span>)}</td>
       <td className="num px-3 py-2">{a.times_used}</td>
       <td className="whitespace-nowrap px-3 py-2 text-right">
@@ -53,6 +95,7 @@ export function Answers() {
 
   return (
     <div className="flex flex-col gap-3">
+      <WeeklyReviewPanel />
       <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
         <Panel title="Add a screening answer">
           <form onSubmit={submit} className="grid gap-3 p-3.5 sm:grid-cols-2">
@@ -64,7 +107,7 @@ export function Answers() {
         </Panel>
         <Panel title="How the bank is used">
           <div className="p-3.5 text-[12.5px] text-muted">
-            <p className="mt-0">The apply agent matches each form question against these answers first (the longest matching phrase wins). Only unmatched questions get a Gemini draft, and those are flagged in the review queue before anything is submitted.</p>
+            <p className="mt-0">The apply agent matches each form question against these answers first (the longest matching phrase wins). Questions it can't answer are added here as open questions. Gemini may draft an answer from your resume, but then the application always waits for your approval.</p>
             <p className="num mb-0">{answers?.length ?? 0} answers · {uses} uses</p>
           </div>
         </Panel>

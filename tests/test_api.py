@@ -230,7 +230,8 @@ def test_start_run_builds_whitelisted_command(client, monkeypatch):
     assert busy.status_code == 409 and busy.json()["detail"]["run_id"] == run_id
     assert client.post("/api/runs/search", json={"import_legacy_db": True, "then_score": True}).status_code == 202
     assert FakePopen.started[1][-2:] == ["--import-legacy-db", "--then-score"]
-    assert client.post("/api/runs/apply").status_code == 501
+    assert client.post("/api/runs/apply", json={"job_id": 7, "review_only": True}).status_code == 202
+    assert FakePopen.started[2][1:] == ["-m", "jobpilot.agents.apply", "--run-id", FakePopen.started[2][4], "--job-id", "7", "--review-only"]
     assert client.post("/api/runs/score", json={"limit": 9999}).status_code == 422
 
 
@@ -291,9 +292,52 @@ def test_crashed_process_is_marked_error(client, db_url, monkeypatch):
 
 def test_table_counts_and_system_info_never_leak_key(client, seeded):
     counts = client.get("/api/stats/tables").json()
-    assert counts["jobs"] == 15 and counts["application_fields"] == 4 and counts["settings"] == 4
+    assert counts["jobs"] == 15 and counts["application_fields"] == 4 and counts["settings"] == 9
     info = client.get("/api/system").json()
     assert set(info) >= {"gemini_model", "gemini_key_set", "legacy_agent_dir", "resume_path"}
     from jobpilot.config import get_config
     key = get_config().gemini_api_key
     assert not key or key not in json.dumps(info)
+
+
+def test_approve_requires_a_waiting_apply_agent(client, db_url):
+    with session_for(db_url) as s:
+        job = Job(title="BA", company="Acme", url="https://example.com/a", url_canonical="a", dedupe_hash="h")
+        s.add(job)
+        s.commit()
+        app = Application(job_id=job.id, state=ApplicationState.pending_review)
+        s.add(app)
+        s.commit()
+        app_id = app.id
+    refused = client.post(f"/api/applications/{app_id}/approve")
+    assert refused.status_code == 409 and "no longer holding" in refused.json()["detail"]
+    with session_for(db_url) as s:
+        s.add(AgentRun(agent=AgentName.apply, status=RunStatus.running))
+        s.commit()
+    assert client.post(f"/api/applications/{app_id}/approve").json()["state"] == "approved"
+
+
+def test_weekly_review_cycle(client, db_url):
+    from jobpilot.db.models import Answer
+
+    with session_for(db_url) as s:
+        s.add(Answer(question="Expected CTC (LPA)", answer="", tags="needs-answer"))
+        s.add(Answer(question="Notice period", answer="30 days", tags=""))
+        s.commit()
+    info = client.get("/api/review/weekly").json()
+    assert info["due"] and [q["question"] for q in info["open_questions"]] == ["Expected CTC (LPA)"]
+    oq = info["open_questions"][0]["id"]
+    assert "needs-answer" not in client.put(f"/api/answers/{oq}", json={"answer": "12"}).json()["tags"]
+    done = client.post("/api/review/weekly/done").json()
+    assert not done["due"] and done["open_questions"] == [] and done["reviewed_at"]
+
+
+def test_last_due_is_monday_0900_ist():
+    from datetime import datetime, timezone
+
+    from jobpilot.weekly import last_due
+
+    # Wed 7 Oct 2026 11:00 IST -> due Mon 5 Oct 09:00 IST
+    assert last_due(datetime(2026, 10, 7, 5, 30, tzinfo=timezone.utc), "mon", "09:00").isoformat() == "2026-10-05T09:00:00+05:30"
+    # Mon 5 Oct 08:00 IST, before 09:00 -> the previous Monday
+    assert last_due(datetime(2026, 10, 5, 2, 30, tzinfo=timezone.utc), "mon", "09:00").isoformat() == "2026-09-28T09:00:00+05:30"

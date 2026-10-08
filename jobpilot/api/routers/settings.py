@@ -22,8 +22,17 @@ class Schedule(BaseModel):
     timezone: str = "Asia/Kolkata"
 
 
+class WeeklyReview(BaseModel):
+    day: str = Field(pattern=r"^(mon|tue|wed|thu|fri|sat|sun)$")
+    time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+
 class SettingsPatch(BaseModel):
     threshold: Optional[int] = Field(None, ge=30, le=95)
+    auto_submit: Optional[bool] = None
+    linkedin_easy_apply_only: Optional[bool] = None
+    review_wait_minutes: Optional[int] = Field(None, ge=5, le=120)
+    weekly_review: Optional[WeeklyReview] = None
     daily_apply_cap: Optional[int] = Field(None, ge=1, le=40)
     search_queries: Optional[list[str]] = None
     schedule: Optional[Schedule] = None
