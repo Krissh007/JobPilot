@@ -1,7 +1,7 @@
 """
-Apply agent (LinkedIn Easy Apply). One job at a time, in your signed-in Chrome profile.
+Apply agent (LinkedIn Easy Apply + Naukri). One job at a time, in your signed-in Chrome profile.
 
-    python -m jobpilot.agents.apply                 # docs_ready LinkedIn jobs >= threshold, up to today's cap
+    python -m jobpilot.agents.apply                 # docs_ready LinkedIn/Naukri jobs >= threshold, up to today's cap
     python -m jobpilot.agents.apply --job-id 132    # one job ("Queue for apply" in the dashboard)
     python -m jobpilot.agents.apply --review-only   # never auto-submit this run
 
@@ -13,6 +13,11 @@ Submit), screenshot, record every field and where it came from. Then:
 - otherwise pause in the Review queue and wait (same tab) for Approve/Skip;
 - sign-in, checkpoint, CAPTCHA or OTP page: stop, mark blocked, notify you,
   and leave the browser on that page. Never typed past, never solved.
+
+Naukri: its "Apply" button IS the submit, so the agent only reads the posting,
+screenshots it and waits for you (or auto-submits under the same rules). After
+Apply, chatbot questions are answered only from your answer bank; anything else
+stops it and leaves the chat for you (see naukri.py).
 
 Daily cap, randomised 20-90 s pauses, one tab at a time. Passwords are never typed.
 """
@@ -32,6 +37,7 @@ from sqlmodel import Session, select
 from jobpilot.agents._run import RunRecorder, agent_run
 from jobpilot.agents.apply.answers import AnswerBank, load_contact, make_drafter
 from jobpilot.agents.apply.filler import easy_apply_module, make_filler_class
+from jobpilot.agents.apply.naukri import READY, make_naukri_applier, naukri_module
 from jobpilot.api.deps import ist_date, today_ist
 from jobpilot.config import DATA_DIR, get_config
 from jobpilot.db.models import (
@@ -52,6 +58,8 @@ from jobpilot.notify import notify
 from jobpilot.resume import load_resume
 
 SECURITY_MARKERS = ("checkpoint", "challenge", "captcha", "authwall", "/login", "/uas/")
+SOURCES = ("linkedin", "naukri")
+NEVER_RETRY = ("not_easy_apply", "external")  # the portal sends these to the company's own site
 SESSION_COOKIE = "li_at"
 SCREENSHOTS = DATA_DIR / "screenshots"
 OPEN_STATES = (ApplicationState.filling, ApplicationState.pending_review, ApplicationState.approved,
@@ -101,8 +109,13 @@ def signed_in_browser() -> Iterator[Any]:
                 pass
 
 
-def is_signed_in(browser: Any) -> bool:
+def is_signed_in(browser: Any, source: str = "linkedin") -> bool:
+    if source == "naukri":
+        return naukri_module().is_signed_in(browser)
     return any(c["name"] == SESSION_COOKIE and c["value"] for c in browser.cookies("https://www.linkedin.com"))
+
+
+LOGIN_HINT = {"linkedin": "python -m src.apply.linkedin login", "naukri": "python -m src.apply.naukri login"}
 
 
 def applied_today(session: Session) -> int:
@@ -113,11 +126,11 @@ def applied_today(session: Session) -> int:
 
 def select_jobs(session: Session, job_id: int | None, threshold: float) -> list[Job]:
     busy = {a.job_id for a in session.exec(select(Application).where(
-        Application.state.in_(OPEN_STATES) | (Application.reason == "not_easy_apply")))}
+        Application.state.in_(OPEN_STATES) | Application.reason.in_(NEVER_RETRY)))}
     if job_id is not None:
         job = session.get(Job, job_id)
         return [job] if job and job.id not in busy else []
-    query = select(Job).where(Job.status == JobStatus.docs_ready, Job.source == "linkedin", Job.is_example.is_(False),
+    query = select(Job).where(Job.status == JobStatus.docs_ready, Job.source.in_(SOURCES), Job.is_example.is_(False),
                               Job.score >= threshold).order_by(Job.score.desc())
     return [job for job in session.exec(query) if job.id not in busy]
 
@@ -295,6 +308,10 @@ def process_job(session: Session, browser: Any, job: Job, rec: RunRecorder, paci
         mark_submitted(session, app, job, Actor.user)
         rec.log(f"  #{job.id} {job.company}: you submitted it in the browser; recorded as applied")
         return "submitted"
+    return close_skipped(session, app, page, job, rec, decision)
+
+
+def close_skipped(session: Session, app: Application, page: Any, job: Job, rec: RunRecorder, decision: str) -> str:
     app.state, app.decided_at = ApplicationState.skipped, utcnow()
     app.reason = {"skipped": "skipped_by_you", "timeout": "timeout"}.get(decision, "tab_closed")
     session.add(app)
@@ -303,6 +320,110 @@ def process_job(session: Session, browser: Any, job: Job, rec: RunRecorder, paci
         page.close()
     rec.log(f"  #{job.id} {job.company}: {'skipped by you' if decision == 'skipped' else 'no decision in time; run Apply for this job again later' if decision == 'timeout' else 'tab closed'}")
     return decision
+
+
+def process_naukri_job(session: Session, browser: Any, job: Job, rec: RunRecorder, pacing: Pacing, *,
+                       auto_submit: bool, threshold: float, wait_minutes: float) -> str:
+    nk = naukri_module()
+    app = Application(job_id=job.id, state=ApplicationState.filling)
+    session.add(app)
+    session.commit()
+
+    def blocked(error: Exception) -> Blocked:
+        app.state, app.reason = ApplicationState.blocked, "blocked"
+        session.add(app)
+        session.commit()
+        return Blocked(f"Naukri showed a sign-in/OTP/CAPTCHA page ({str(error)[:160]})")
+
+    page = browser.new_page()
+    try:
+        page.goto(job.url, wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+        applier = make_naukri_applier()(page, AnswerBank(session, load_contact()))
+        status = applier.precheck()
+    except nk.NaukriSecurityError as error:
+        raise blocked(error)
+    except Exception as error:
+        session.rollback()
+        app.state, app.decided_at, app.reason = ApplicationState.skipped, utcnow(), "failed"
+        session.add(app)
+        session.commit()
+        try:
+            page.close()
+        except Exception:
+            pass
+        rec.log(f"  #{job.id} {job.company}: FAILED to open the Naukri posting ({str(error).splitlines()[0][:160]}); skipped")
+        return "failed"
+
+    if status == nk.ALREADY_APPLIED:
+        mark_submitted(session, app, job, Actor.agent)
+        page.close()
+        rec.log(f"  #{job.id} {job.company}: Naukri says you already applied; marked applied")
+        return "already_applied"
+    if status == nk.EXTERNAL:
+        app.state, app.decided_at, app.reason = ApplicationState.skipped, utcnow(), "external"
+        session.add(app)
+        session.commit()
+        page.close()
+        rec.log(f"  #{job.id} {job.company}: Naukri sends this one to the company's site; apply there yourself")
+        return "external"
+    if status != READY:  # NOT_SIGNED_IN: a login wall is never typed past
+        raise blocked(RuntimeError("Naukri asks you to log in to apply"))
+
+    SCREENSHOTS.mkdir(parents=True, exist_ok=True)
+    shot = SCREENSHOTS / f"application_{app.id}.png"
+    page.screenshot(path=str(shot), full_page=False)
+    app.screenshot_path = str(shot)
+    session.add(ApplicationField(application_id=app.id, step=1, field_name="Naukri profile and resume on file",
+                                 value_used="sent by Naukri when Apply is clicked", source=FieldSource.resume))
+    session.commit()
+
+    eligible = job.status == JobStatus.docs_ready and (job.score or 0) >= threshold
+    actor = Actor.agent
+    if not (auto_submit and eligible):
+        reason = "auto-submit is off" if not auto_submit else "job not docs_ready / below threshold"
+        app.state = ApplicationState.pending_review
+        session.add(app)
+        session.commit()
+        notify("JobPilot: review needed", f"{job.title} at {job.company} (Naukri) is ready to apply ({reason}).")
+        rec.log(f"  #{job.id} {job.title} | {job.company}: Naukri posting checked (signed in, Apply button present). "
+                f"Nothing sent yet: on Naukri, Apply IS the submit. Waiting up to {wait_minutes:g} min for you ({reason})")
+        decision = wait_for_decision(session, app, page, applier, wait_minutes, pacing, rec, applier.confirmed)
+        if decision == "submitted_by_you":
+            mark_submitted(session, app, job, Actor.user)
+            rec.log(f"  #{job.id} {job.company}: you applied in the browser; recorded as applied")
+            return "submitted"
+        if decision != "approved":
+            return close_skipped(session, app, page, job, rec, decision)
+        actor = Actor.user
+
+    try:
+        outcome = applier.submit()
+    except nk.NaukriSecurityError as error:
+        raise blocked(error)
+    save_fields(session, app, applier.records, applier.unknown, applier.consent)
+    session.commit()
+    if outcome == nk.SUBMITTED:
+        mark_submitted(session, app, job, actor)
+        page.close()
+        rec.log(f"  #{job.id} {job.company}: APPLIED on Naukri ({'auto-submit' if actor == Actor.agent else 'after your approval'}; "
+                f"{len(applier.records)} chatbot answer(s) from your answer bank)")
+        return "submitted"
+
+    # Apply was clicked but Naukri wants more: hand the open chat to you.
+    left = "; ".join((applier.consent + applier.unknown)[:4]) or "Naukri didn't confirm the application"
+    app.state, app.reason = ApplicationState.pending_review, "incomplete"
+    session.add(app)
+    session.commit()
+    notify("JobPilot: finish this Naukri application", f"{job.title} at {job.company}: {left[:120]}")
+    rec.log(f"  #{job.id} {job.company}: Naukri needs you: {left[:300]}. Answer it in the agent's browser window "
+            f"(waiting up to {wait_minutes:g} min).")
+    decision = wait_for_decision(session, app, page, applier, wait_minutes, pacing, rec, applier.confirmed)
+    if decision == "submitted_by_you":
+        mark_submitted(session, app, job, Actor.user)
+        rec.log(f"  #{job.id} {job.company}: you finished it in the browser; recorded as applied")
+        return "submitted"
+    return close_skipped(session, app, page, job, rec, decision)
 
 
 def run(job_id: int | None = None, review_only: bool = False, limit: int | None = None, db_url: str | None = None,
@@ -321,7 +442,7 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                 f"{len(jobs)} job(s) queued" + (f" · stop after {limit} filled form(s)" if limit else ""))
         filled = 0
         if budget <= 0 or not jobs:
-            rec.log("Nothing to do (daily cap reached or no docs_ready LinkedIn jobs).")
+            rec.log("Nothing to do (daily cap reached or no docs_ready LinkedIn/Naukri jobs).")
             return
         resume = load_resume()
         if drafter_factory is None:
@@ -329,9 +450,14 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                 return make_drafter(lambda: GeminiClient(on_retry=rec.log), session, resume, job, rec.log)
 
         with browser_factory() as browser:
-            if not is_signed_in(browser):
-                raise RuntimeError("Not signed in to LinkedIn in the agent profile. In E:\\job_search_agent run: "
-                                   "python -m src.apply.linkedin login (you type the password).")
+            signed_out = {src for src in {job.source for job in jobs} if not is_signed_in(browser, src)}
+            for src in sorted(signed_out):
+                rec.log(f"Not signed in to {src} in the agent profile; skipping its jobs. "
+                        f"In E:\\job_search_agent run: {LOGIN_HINT.get(src, '')} (you type the password).")
+            jobs = [job for job in jobs if job.source not in signed_out]
+            if not jobs:
+                raise RuntimeError(f"Not signed in to {', '.join(sorted(signed_out))} in the agent profile. In "
+                                   f"E:\\job_search_agent run: {' / '.join(LOGIN_HINT.get(s, '') for s in sorted(signed_out))}")
             for index, job in enumerate(jobs):
                 if budget <= 0:
                     rec.log(f"Daily cap of {cap} reached; the rest wait for tomorrow")
@@ -343,8 +469,12 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                     rec.log(f"Pausing {pacing.between_jobs():.0f}s before the next job")
                 rec.processed += 1
                 try:
-                    outcome = process_job(session, browser, job, rec, pacing, auto_submit=auto_submit, threshold=threshold,
-                                          wait_minutes=wait_minutes, drafter_factory=drafter_factory)
+                    if job.source == "naukri":
+                        outcome = process_naukri_job(session, browser, job, rec, pacing, auto_submit=auto_submit,
+                                                     threshold=threshold, wait_minutes=wait_minutes)
+                    else:
+                        outcome = process_job(session, browser, job, rec, pacing, auto_submit=auto_submit, threshold=threshold,
+                                              wait_minutes=wait_minutes, drafter_factory=drafter_factory)
                 except Blocked as error:
                     notify("JobPilot: blocked", f"{error}. The browser is left on that page for you.")
                     rec.log(f"BLOCKED at #{job.id} {job.company}: {error}. Stopping; the window stays open for 15 min.")
@@ -352,7 +482,7 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                     while time.monotonic() < deadline and browser.pages:
                         pacing.sleep(5)
                     raise
-                if outcome not in ("not_easy_apply", "already_applied", "failed"):
+                if outcome not in ("not_easy_apply", "external", "already_applied", "failed"):
                     filled += 1
                 if outcome == "submitted":
                     rec.found += 1

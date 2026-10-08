@@ -45,7 +45,7 @@ export function Settings() {
             <legend className={labelClass}>Apply agent</legend>
             <label className="flex items-start gap-2 text-[13px]">
               <input type="checkbox" checked={form.auto_submit} onChange={(e) => setForm({ ...form, auto_submit: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
-              <span><b>Auto-submit fully answered applications</b><br /><span className="text-muted">Only Docs-ready LinkedIn jobs ≥ threshold where every field came from your resume/profile or answer bank. Anything with a Gemini-drafted or empty answer waits in Review. Off = every application waits for your Approve.</span></span>
+              <span><b>Auto-submit fully answered applications</b><br /><span className="text-muted">Only Docs-ready LinkedIn and Naukri jobs ≥ threshold where every field came from your resume/profile or answer bank. Anything with a Gemini-drafted, empty or consent answer waits in Review. Naukri chat questions are only ever answered from the answer bank. Off = every application waits for your Approve.</span></span>
             </label>
             <div className="mt-2 grid grid-cols-3 gap-3">
               <div><label htmlFor="wait" className={labelClass}>Review wait (min)</label><input id="wait" type="number" min={5} max={120} value={form.review_wait_minutes} onChange={(e) => setForm({ ...form, review_wait_minutes: Number(e.target.value) })} className={inputClass} /></div>

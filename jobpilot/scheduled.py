@@ -1,7 +1,8 @@
 """
 The scheduled pipeline Windows Task Scheduler runs (Phase 8): search -> score -> docs.
 
-    python -m jobpilot.scheduled                  # one pass now (what the task runs)
+    python -m jobpilot.scheduled                  # one pass now, any time
+    python -m jobpilot.scheduled --log            # what the task runs: logs to a file, skips late runs
     python -m jobpilot.scheduled --print-config   # JSON used by scripts/register_tasks.ps1
 
 Each agent records its own row in agent_runs, so the dashboard shows scheduled runs
@@ -101,6 +102,16 @@ def run_pipeline(steps: list[tuple[str, Callable[[], None]]] | None = None, lock
     return 1 if failed else 0
 
 
+GRACE_MINUTES = 30  # a run Windows starts late (PC was asleep) still counts if it's this close to the window
+
+
+def within_window(now: datetime, start: str, window_minutes: int, grace: int = GRACE_MINUTES) -> bool:
+    """True if now (local IST time) is between start and start+window (+grace). Missed runs after that are skipped."""
+    hour, minute = (int(x) for x in start.split(":"))
+    minutes = now.hour * 60 + now.minute
+    return hour * 60 + minute <= minutes <= hour * 60 + minute + window_minutes + grace
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--print-config", action="store_true", help="Print the schedule settings as JSON and exit")
@@ -112,6 +123,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.log or sys.stdout is None:  # pythonw.exe has no console
         LOG.parent.mkdir(parents=True, exist_ok=True)
         sys.stdout = sys.stderr = open(LOG, "a", encoding="utf-8", buffering=1)
+    if args.log:  # the scheduled task: Windows may start a missed run hours late (StartWhenAvailable)
+        cfg = config()
+        if not within_window(datetime.now(), cfg["start"], cfg["window_minutes"]):
+            print(f"{datetime.now():%Y-%m-%d %H:%M} outside the schedule window ({cfg['start']} + "
+                  f"{cfg['window_minutes'] // 60} h); skipped this late run", flush=True)
+            sys.exit(0)
     sys.exit(run_pipeline())
 
 

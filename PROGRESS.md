@@ -202,3 +202,29 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - schedule API with PowerShell mocked (status, register, unregister, Task Scheduler error)
   - Word keyword cap
 - Screens: `design/screens/13-settings-schedule-*.png`, `14-schedule-registered-*.png`.
+
+
+## Phase 7b: Naukri apply (2026-10-08)
+- You signed in to Naukri with the legacy helper. Checked headless in the agent profile, cookie names only: `nauk_at`/`nauk_rt` present (Naukri) and `li_at` present (LinkedIn).
+- `jobpilot/agents/apply/naukri.py` reuses the legacy `NaukriApplier` (its selectors, chatbot handling and confirmation check), split in two:
+  - `precheck()` only reads the posting: signed in? external? already applied? It never clicks. On Naukri, Apply IS the submit.
+  - `submit()` clicks Apply and answers the chatbot **only from your answer bank/profile**. Gemini drafts are never typed into Naukri, and consent/terms questions are left for you.
+  - An unknown question stops it, the chat stays open for you, and the question becomes an open question in the answer bank.
+- Runner:
+  - Docs-ready Naukri jobs ≥ threshold are now queued alongside LinkedIn.
+  - Per-portal sign-in check: a signed-out portal's jobs are skipped with the login command.
+  - "Login to apply" counts as a login wall → blocked.
+  - Company-site jobs → reason `external`, never retried.
+  - Same auto-submit rule as LinkedIn (setting on + Docs-ready + score ≥ threshold).
+- Dashboard: Queue for apply works on Naukri jobs. The Review card explains that nothing has been sent yet and that Approve clicks Naukri's Apply. Wording updated in Settings and Runs.
+- Bug found by the new tests: the legacy matcher wants lower-cased keys, so bank answers weren't used in the Naukri chat. Fixed.
+- Scheduler: a run Windows starts late is now skipped when it's past the window + 30 min.
+  - Found tonight: the PC slept through 12:00, 16:00 and 20:00, and Windows started the missed run at 23:49.
+  - Manual runs aren't affected.
+- Tests: 98 passed. New Naukri tests:
+  - nothing is clicked while waiting; approve → applied
+  - auto-submit with bank answers; unknown chat question handed to you + open question
+  - consent never answered; company site external + not retried
+  - login prompt → blocked; signed-out portal skipped with the hint
+  - plus the late-run window test
+- Not yet done: a live Naukri review-mode run. It needs you at the PC to Approve or Skip within 20 min.

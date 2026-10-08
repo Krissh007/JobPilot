@@ -83,3 +83,12 @@ def test_schedule_api_survives_task_scheduler_errors(client: TestClient, monkeyp
     monkeypatch.setitem(schedule_router._cache, "tasks", None)
     body = client.get("/api/schedule").json()
     assert body["tasks"] == [] and "Access is denied" in body["error"]
+
+
+def test_late_runs_outside_the_window_are_skipped():
+    from datetime import datetime
+
+    at = lambda h, m: datetime(2026, 10, 8, h, m)  # noqa: E731
+    assert scheduled.within_window(at(8, 0), "08:00", 840) and scheduled.within_window(at(20, 1), "08:00", 840)
+    assert scheduled.within_window(at(22, 25), "08:00", 840)  # missed 20:00 run started a bit late
+    assert not scheduled.within_window(at(23, 49), "08:00", 840) and not scheduled.within_window(at(7, 30), "08:00", 840)

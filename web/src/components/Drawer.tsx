@@ -67,8 +67,9 @@ function JobBody({ job, threshold, onClose, toast }: { job: JobDetail; threshold
     onSuccess: (run) => toast(`Apply run #${run.id} started for ${job.company}. Chrome opens; follow it in Runs / Review.`),
     onError: (e: Error) => toast(e.message),
   });
-  const external = job.applications.some((a) => a.reason === "not_easy_apply");
-  const canQueue = job.source === "linkedin" && (job.status === "docs_ready" || job.status === "shortlisted") && !job.is_example && !external;
+  const external = job.applications.some((a) => a.reason === "not_easy_apply" || a.reason === "external");
+  const portal = job.source === "naukri" ? "Naukri" : "LinkedIn";
+  const canQueue = (job.source === "linkedin" || job.source === "naukri") && (job.status === "docs_ready" || job.status === "shortlisted") && !job.is_example && !external;
   const folder = useMutation({ mutationFn: () => api.openFolder(job.id), onSuccess: (r) => toast(`Opened ${r.opened}`), onError: (e: Error) => toast(e.message) });
 
   const scoreColor = job.score == null ? "text-muted" : job.score >= threshold ? "text-good" : job.score >= threshold - 15 ? "text-warn" : "text-muted";
@@ -113,12 +114,12 @@ function JobBody({ job, threshold, onClose, toast }: { job: JobDetail; threshold
           <div className="px-3 py-2"><span className="block text-[11px] text-muted">Applied</span>{when(job.applied_at)}</div>
         </div>
 
-        {job.applications.some((a) => a.reason === "not_easy_apply") && (
-          <p className="m-0 rounded-md border border-line-2 bg-sunk px-3 py-2 text-[12.5px]"><b>External apply.</b> LinkedIn sends this job to the company's site, so the agent can't apply. Use <i>Open posting</i> with the tailored documents below.</p>
+        {external && (
+          <p className="m-0 rounded-md border border-line-2 bg-sunk px-3 py-2 text-[12.5px]"><b>External apply.</b> {portal} sends this job to the company's site, so the agent can't apply. Use <i>Open posting</i> with the tailored documents below.</p>
         )}
         <div className="flex flex-wrap gap-1.5 border-t border-line pt-3">
           <Button variant="primary" disabled={!canQueue || queue.isPending} onClick={() => queue.mutate()}
-            title={canQueue ? "Fill the LinkedIn Easy Apply form now. Auto-submit only if allowed in Settings." : "Only LinkedIn jobs that are Shortlisted or Docs ready (Naukri after you sign in)"}>Queue for apply</Button>
+            title={canQueue ? (job.source === "naukri" ? "Check the Naukri posting and wait for your Approve (on Naukri, Apply is the submit). Auto-submit only if allowed in Settings." : "Fill the LinkedIn Easy Apply form now. Auto-submit only if allowed in Settings.") : "Only LinkedIn and Naukri jobs that are Shortlisted or Docs ready"}>Queue for apply</Button>
           <a href={job.url} target="_blank" rel="noreferrer noopener"><Button>Open posting ↗</Button></a>
           <a href={job.docs.resume ? `/api/jobs/${job.id}/docs/resume` : undefined} aria-disabled={!job.docs.resume}><Button disabled={!job.docs.resume} title={job.docs.resume ? "" : "Not generated yet. Run the docs agent from Runs"}>Resume.docx</Button></a>
           <a href={job.docs.cover ? `/api/jobs/${job.id}/docs/cover` : undefined} aria-disabled={!job.docs.cover}><Button disabled={!job.docs.cover}>Cover.docx</Button></a>

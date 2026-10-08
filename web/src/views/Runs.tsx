@@ -9,7 +9,7 @@ const AGENTS: { name: AgentName; title: string; desc: string; phase?: string }[]
   { name: "search", title: "Search", desc: "Legacy discovery + matching on Naukri and LinkedIn, saved into jobpilot.db." },
   { name: "score", title: "Score", desc: "Gemini scores unscored JDs against your resume and shortlists ≥ threshold." },
   { name: "docs", title: "Docs", desc: "Tailored ATS resume + cover letter (.docx) for shortlisted jobs, fact-checked against your resume." },
-  { name: "apply", title: "Apply", desc: "LinkedIn Easy Apply for Docs-ready jobs: fills, screenshots, then auto-submits only if Settings allow and every answer is yours; otherwise waits in Review." },
+  { name: "apply", title: "Apply", desc: "LinkedIn Easy Apply and Naukri for Docs-ready jobs: fills or checks, screenshots, then auto-submits only if Settings allow and every answer is yours; otherwise waits in Review." },
 ];
 
 function StatusChip({ status }: { status: Run["status"] }) {

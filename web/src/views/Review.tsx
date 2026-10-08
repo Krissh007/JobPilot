@@ -16,6 +16,7 @@ function Card({ app, threshold }: { app: Application; threshold: number }) {
   });
   const flagged = app.needs_review;
   const incomplete = app.reason === "incomplete";
+  const naukri = app.job?.source === "naukri";
   return (
     <Panel
       title={<span className="flex items-center gap-2">{app.job?.title} · {app.job?.company} <ScoreNum score={app.job?.score ?? null} threshold={threshold} />{app.is_example && <ExampleTag />}</span>}
@@ -24,8 +25,11 @@ function Card({ app, threshold }: { app: Application; threshold: number }) {
         <div className="flex min-w-0 flex-col gap-3">
           {incomplete && (
             <div role="note" className="rounded-md border border-warn/40 bg-warn-soft p-2.5 text-[12.5px]">
-              <b className="text-warn">Not ready to submit.</b> The form is stuck before LinkedIn's Submit page: the highlighted rows need you (consent boxes are never ticked by the agent). Finish them in the agent's Chrome window. Approve unlocks once the form reaches Submit, or submit it there yourself and JobPilot records it.
+              <b className="text-warn">Not ready to submit.</b> {naukri ? "Naukri's screening chat asked something your answer bank can't answer (or a consent question). Answer it in the agent's Chrome window; JobPilot records the application when Naukri confirms it." : "The form is stuck before LinkedIn's Submit page: the highlighted rows need you (consent boxes are never ticked by the agent). Finish them in the agent's Chrome window. Approve unlocks once the form reaches Submit, or submit it there yourself and JobPilot records it."}
             </div>
+          )}
+          {naukri && !incomplete && (
+            <p className="m-0 rounded-md border border-line-2 bg-sunk px-2.5 py-2 text-[12.5px]"><b>Naukri:</b> nothing has been sent yet. Approve clicks Naukri's Apply, which sends your Naukri profile and resume; any screening questions are answered only from your answer bank.</p>
           )}
           <p className="m-0 text-[12.5px] text-muted">
             {flagged ? <b className="text-warn">{flagged} answer{flagged > 1 ? "s" : ""} drafted by Gemini need your eye (highlighted).</b> : "Every answer came from your resume or answer bank."}

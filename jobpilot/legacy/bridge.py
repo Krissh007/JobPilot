@@ -68,6 +68,14 @@ def easy_apply() -> ModuleType:
     return module
 
 
+def naukri() -> ModuleType:
+    """The legacy Naukri applier (selectors, chatbot handling, confirmation check)."""
+    _ensure_path()
+    from src.apply import naukri as module
+
+    return module
+
+
 def load_master_resume(path: Path) -> str:
     """Plain text of a .docx/.pdf/.md/.txt resume, read exactly as the legacy tailoring reads it."""
     _ensure_path()
