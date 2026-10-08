@@ -7,6 +7,7 @@ default Monday 09:00) until you press "Mark reviewed" in the dashboard.
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -69,7 +70,8 @@ def main() -> None:
     if info["due"]:
         notify("JobPilot: weekly answer review", f"{len(info['open_questions'])} open question(s), "
                f"{len(info['new_this_week'])} new this week. Review them so more applications can auto-submit.")
-    print("due" if info["due"] else "not due", "|", len(info["open_questions"]), "open questions")
+    if sys.stdout is not None:  # pythonw.exe (the scheduled task) has no console
+        print("due" if info["due"] else "not due", "|", len(info["open_questions"]), "open questions")
 
 
 if __name__ == "__main__":

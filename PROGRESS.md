@@ -171,3 +171,34 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - open question, consent box never ticked + Approve refused until you finish
   - security block, not signed in, daily cap, broken page, not-Easy-Apply remembered
 - Still open: the 5 open answers (yours); Naukri after you sign in; turning auto-submit on (your call).
+
+
+## Phase 8: scheduler (2026-10-08)
+- `jobpilot/scheduled.py` runs one pass: search → score → docs.
+  - Every step runs even if an earlier one failed, and each step is its own row in Agent runs.
+  - A lock file stops overlapping passes; a lock left by a crashed pass is taken over.
+  - Under `pythonw` it logs to `data\logs\scheduled.log`. The legacy search no longer opens a console window.
+  - Apply is never scheduled.
+- `scripts/register_tasks.ps1` (`-WhatIf`, `-Unregister`) registers two tasks for your user, using the times in Settings:
+  - `JobPilot Search-Score-Docs`: daily 08:00, every 4 h for 14 h → 08:00, 12:00, 16:00, 20:00 IST.
+  - `JobPilot Weekly-Answer-Review`: Monday 09:00 → `jobpilot.weekly` toast.
+  - Both are Interactive logon (only while you're logged on), start a missed run when the PC is available, ignore a new instance while one runs, stop after 2 h, and need no admin.
+- API: `GET /api/schedule` returns the Task Scheduler status (cached 20 s) and the log tail. `POST /api/schedule/register` and `/unregister` run the same script.
+- Dashboard: Settings → **Schedule** panel:
+  - Edit every/from/until, preview the run times.
+  - Task status with next run, last run and result, plus Register / Update / Remove.
+  - The terminal command and the last scheduled log.
+- **Registered on your request** at 08:00 IST. Next pipeline run: today 12:00. Next weekly reminder: Mon 12 Oct 09:00.
+- Real pass run by hand (`python -m jobpilot.scheduled --log`, 07:54–08:07, exit 0):
+  - Search: 265 discovered, 108 stale, 140 rejected by gates, **17 new**.
+  - Score: 7 shortlisted (Deloitte 93, Techdome 92, Infor 85, MassMutual, JPMorgan, Wise, CGI 62).
+  - Docs: **8 new Docs-ready** jobs.
+  - 2 jobs skipped:
+    - Micro1 #29 hit Word's 255-char keywords limit. Fixed: the legacy writer's property setter is wrapped in memory and the keywords cut to fit. On the retry the cover letter was too short after the fact check, which is a correct skip.
+    - Micro1 #47: the same short-cover-letter skip.
+- Tests: 90 passed. New:
+  - pipeline continues after a failed step; lock skip and stale-lock takeover
+  - config from Settings
+  - schedule API with PowerShell mocked (status, register, unregister, Task Scheduler error)
+  - Word keyword cap
+- Screens: `design/screens/13-settings-schedule-*.png`, `14-schedule-registered-*.png`.

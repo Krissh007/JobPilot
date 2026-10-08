@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useSettings, useSystem } from "../data";
+import { SchedulePanel } from "../components/SchedulePanel";
 import { useUI } from "../state";
 import { Button, Empty, Panel, cx, inputClass, labelClass } from "../ui";
 
@@ -20,12 +21,11 @@ export function Settings() {
     mutationFn: () => api.saveSettings({ threshold: form.threshold, daily_apply_cap: form.daily_apply_cap, search_queries: form.queries.split("\n"),
       auto_submit: form.auto_submit, review_wait_minutes: form.review_wait_minutes, weekly_review: { day: form.day, time: form.time },
       linkedin_easy_apply_only: form.easy_apply_only }),
-    onSuccess: () => { toast("Settings saved"); qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["meta"] }); },
+    onSuccess: () => { toast("Settings saved"); qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["meta"] }); qc.invalidateQueries({ queryKey: ["schedule"] }); },
     onError: (e: Error) => toast(`Not saved: ${e.message}`),
   });
   if (!settings) return <Empty title="Loading settings…" />;
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(); };
-  const s = settings.schedule;
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -58,12 +58,7 @@ export function Settings() {
         </form>
       </Panel>
       <div className="flex flex-col gap-3">
-        <Panel title="Schedule">
-          <div className="p-3.5 text-[12.5px]">
-            <p className="m-0">Search + score every <b>{s.every_hours} h</b> between <b className="num">{s.start}</b> and <b className="num">{s.end}</b> ({s.timezone}).</p>
-            <p className="mb-0 mt-1.5 text-muted">Registered with Windows Task Scheduler in Phase 8. Not active yet.</p>
-          </div>
-        </Panel>
+        <SchedulePanel settings={settings} />
         <Panel title="Gemini and paths">
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 p-3.5 text-[12.5px]">
             <dt className="text-muted">API key</dt><dd className={cx("m-0", system?.gemini_key_set ? "text-good" : "text-bad")}>{system ? (system.gemini_key_set ? "set in .env (hidden)" : "missing: add GEMINI_API_KEY to .env") : "…"}</dd>

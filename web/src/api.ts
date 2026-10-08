@@ -68,6 +68,16 @@ export interface SystemInfo {
   legacy_agent_dir: string; legacy_python: string; resume_path: string;
 }
 
+export interface ScheduledTask {
+  name: string; registered: boolean; state?: string; next_run?: string | null; last_run?: string | null;
+  last_result?: number; last_result_text: string;
+}
+
+export interface ScheduleStatus {
+  tasks: ScheduledTask[]; error: string; log_tail: string[]; command: string; checked_at: string;
+  config: { tasks: { pipeline: string; weekly: string }; start: string; every_hours: number; window_minutes: number; weekly_day: string; weekly_time: string };
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public detail: unknown) {
     super(typeof detail === "string" ? detail : (detail as { message?: string })?.message ?? `HTTP ${status}`);
@@ -127,6 +137,8 @@ export const api = {
   weeklyDone: () => request<WeeklyReview>("/review/weekly/done", { method: "POST" }),
   tableCounts: () => request<Record<string, number>>("/stats/tables"),
   system: () => request<SystemInfo>("/system"),
+  schedule: () => request<ScheduleStatus>("/schedule"),
+  registerSchedule: (on: boolean) => request<ScheduleStatus & { output: string[] }>(`/schedule/${on ? "register" : "unregister"}`, { method: "POST" }),
   seedExamples: () => request<{ added_jobs: number }>("/examples/seed", { method: "POST" }),
   purgeExamples: () => request<Record<string, number>>("/examples", { method: "DELETE" }),
 };

@@ -55,7 +55,8 @@ def run_legacy_search(rec: RunRecorder, legacy_dir: Path, python: str, known_url
 
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
     process = subprocess.Popen(command, cwd=legacy_dir, env=env, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+                               stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))  # no console pop-up from scheduled runs
     stats, jobs = None, []
     assert process.stdout is not None
     for raw in process.stdout:

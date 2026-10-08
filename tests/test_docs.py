@@ -179,3 +179,12 @@ def test_unexpected_error_skips_job_not_run(db_url, setup, monkeypatch):
     with Session(get_engine(db_url)) as s:
         run = s.exec(select(AgentRun)).one()
     assert run.status == RunStatus.ok and "SKIPPED, boom" in run.log
+
+
+def test_word_properties_fit_255_chars():
+    from jobpilot.legacy.bridge import fit_keywords
+
+    long = ["Business Process Analysis", "Cross-functional Collaboration", "Stakeholder Management"] * 10
+    kept = fit_keywords(long)
+    assert 0 < len(kept) < 25 and len(", ".join(kept)) <= 255 and kept == long[:len(kept)]
+    assert fit_keywords(["SQL", "Jira"]) == ["SQL", "Jira"]

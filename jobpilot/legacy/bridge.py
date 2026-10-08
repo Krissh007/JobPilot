@@ -29,7 +29,35 @@ def tailoring() -> tuple[ModuleType, ModuleType, ModuleType]:
     _ensure_path()
     from src.tailoring import docx_writer, generator, tailor
 
+    _cap_docx_properties(docx_writer)
     return tailor, docx_writer, generator
+
+
+WORD_PROPERTY_MAX = 255  # Word rejects longer core properties (title, keywords)
+
+
+def fit_keywords(keywords: list[str], limit: int = WORD_PROPERTY_MAX) -> list[str]:
+    """As many keywords (max 25, the writer's own cap) as fit in ', '.join(...) <= limit."""
+    kept: list[str] = []
+    for word in keywords[:25]:
+        if len(", ".join(kept + [word])) > limit:
+            break
+        kept.append(word)
+    return kept
+
+
+def _cap_docx_properties(docx_writer: ModuleType) -> None:
+    """In memory only (the legacy file is untouched): keep Word's 255-char property limit."""
+    original = docx_writer._set_properties
+    if getattr(original, "jobpilot_capped", False):
+        return
+
+    def capped(document, title, author, keywords):
+        title = title if len(title) <= WORD_PROPERTY_MAX else title[:WORD_PROPERTY_MAX - 3].rstrip() + "..."
+        return original(document, title, author, fit_keywords(list(keywords)))
+
+    capped.jobpilot_capped = True
+    docx_writer._set_properties = capped
 
 
 def easy_apply() -> ModuleType:

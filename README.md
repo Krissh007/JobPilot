@@ -138,10 +138,45 @@ The dashboard is built with React, Vite, Tailwind and TypeScript. It uses the "L
 | **Board** | Dense rows per stage. Drag a row to another column to change its status, and the move is written to history |
 | **Jobs** | Sortable table: score, role, company, location, experience, source, rule score, status, found |
 | **Job drawer** | Score and sub-score bars, the reason, matched skills, status, notes (saved when you leave the field), posting link, documents, JD, history, delete |
-| **Review** | Filled fields with the Gemini-drafted answers highlighted, a screenshot, and Approve submit / Skip. Blocked applications are listed separately |
-| **Runs** | Run now for search and score, with a live log over Server-Sent Events, plus run history with logs |
-| **Answers** | Add, edit and delete screening answers |
+| **Review** | Filled fields with where each value came from (Gemini drafts and empty or consent fields highlighted), a screenshot, and Approve submit / Skip. Approve is locked while a form is stuck before LinkedIn's Submit page. Blocked applications are listed separately |
+| **Runs** | Run now for search, score, docs and apply (apply has a review-only option), with a live log over Server-Sent Events, plus run history with logs |
+| **Answers** | Add, edit and delete screening answers; open questions the apply agent met are highlighted; the weekly review card |
 | **Database** | Table cards with row counts, CSV/JSON export, import from the legacy archive, and removing or adding the example rows |
-| **Settings** | Threshold, daily cap and search queries (the search agent uses these), schedule, Gemini model and key status (the key is never shown), and the site-terms warning |
+| **Settings** | Threshold, daily cap, search queries, LinkedIn Easy-Apply-only, the auto-submit switch, review wait, weekly review time, the Windows schedule (status, Register / Update / Remove), Gemini model and key status (the key is never shown), and the site-terms warning |
 
 Keyboard: `/` jumps to search, `N` adds a job, `Esc` closes the drawer.
+
+## Apply agent (LinkedIn Easy Apply)
+
+```powershell
+.venv\Scripts\python.exe -m jobpilot.agents.apply --review-only --limit 1   # fill one form, wait for you
+.venv\Scripts\python.exe -m jobpilot.agents.apply --job-id 190 --review-only
+.venv\Scripts\python.exe -m jobpilot.legacy.answers_import                 # one-off: answer bank from the legacy profile
+```
+
+- Uses your **installed Chrome** with the legacy signed-in profile (`E:\job_search_agent\data\browser_profile`), headed, one tab, a 20–90 s random pause between jobs, and the daily cap. It never types a password.
+- Every field records its source: resume/profile, answer bank, or a Gemini draft (Gemini only answers from your resume and may leave a field empty). Unknown questions are added to the answer bank as open questions.
+- **Consent, terms and privacy questions are never ticked or answered by the agent**, even if the answer bank has one.
+- It stops on LinkedIn's Submit page, saves a screenshot, sends a Windows toast and waits (default 20 min) for Approve or Skip in the Review queue. If it couldn't reach the Submit page, the application is marked *incomplete*: finish it in the agent's Chrome window and either Approve (it unlocks once the form reaches Submit) or submit it there yourself; JobPilot records it either way.
+- **Auto-submit** (Settings, off by default) submits without asking only when every field came from your resume/profile or answer bank, nothing is empty or consent-gated, and the job is Docs-ready with score ≥ threshold.
+- CAPTCHA, checkpoint or login wall: the application is marked *blocked*, you get a toast, the window stays open and the run stops. Nothing tries to solve it.
+- Jobs that are "Apply on company website" are remembered and never opened again; the drawer marks them *External apply*.
+- **Site terms:** automating a signed-in LinkedIn or Naukri account is against both sites' user agreements and can get the account restricted. The low cap and pauses reduce that risk; they don't remove it.
+
+## Scheduling (Windows Task Scheduler)
+
+Register from **Settings → Schedule → Register with Windows**, or from a terminal:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1            # register / update
+powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1 -WhatIf    # preview
+powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1 -Unregister
+```
+
+| Task | When (from Settings) | Runs |
+|---|---|---|
+| `JobPilot Search-Score-Docs` | daily 08:00, every 4 h until 22:00 IST | `pythonw -m jobpilot.scheduled --log`: search → score → docs, each recorded in Agent runs; log in `data\logs\scheduled.log` |
+| `JobPilot Weekly-Answer-Review` | Monday 09:00 IST | `pythonw -m jobpilot.weekly`: toast if the answer review is due |
+
+The tasks run only while you are logged on (search uses your signed-in browser profile), start a missed run when the PC is next available, never overlap (a lock file plus *ignore new instance*), stop after 2 h, and need no admin rights. **Apply is never scheduled**: it opens a browser and waits for you. After changing the times in Settings, click **Update tasks**.
+

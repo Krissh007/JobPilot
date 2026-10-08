@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from jobpilot.api.routers import analytics, answers, applications, data, jobs, runs, settings
+from jobpilot.api.routers import analytics, answers, applications, data, jobs, runs, schedule, settings
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -33,7 +33,7 @@ def create_app(db_url: str | None = None) -> FastAPI:
 
     app.add_middleware(CORSMiddleware, allow_origins=DEV_ORIGINS, allow_methods=["*"], allow_headers=["*"])
     for router in (data.router, jobs.router, applications.router, runs.router, answers.router,
-                   settings.router, analytics.router):
+                   settings.router, schedule.router, analytics.router):
         app.include_router(router, prefix="/api")
     return app
 
