@@ -1,16 +1,19 @@
 <#
-Registers JobPilot's two Windows Task Scheduler tasks for the current user.
+Registers JobPilot's three Windows Task Scheduler tasks for the current user.
 Times come from the dashboard Settings (schedule + weekly review); run this again after changing them.
 
   JobPilot Search-Score-Docs      daily from <start>, every <every_hours> h for the window  -> python -m jobpilot.scheduled
   JobPilot Weekly-Answer-Review   weekly on <day> at <time>                                   -> python -m jobpilot.weekly
+  JobPilot Catch-up               on sign-in, unlock and wake from sleep (2 min delay)         -> python -m jobpilot.scheduled --catch-up
+                                  runs a pass only when the last search is overdue (Windows doesn't
+                                  reliably start missed runs after sleep or modern standby)
 
 Runs only while you are logged on (the search uses your signed-in browser profile), starts a missed
 run as soon as the PC is available again, never runs two passes at once, and needs no admin rights.
 
   powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1             # register / update
   powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -WhatIf     # show what it would do
-  powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -Unregister # remove both tasks
+  powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -Unregister # remove all three tasks
 #>
 param([switch]$Unregister, [switch]$WhatIf)
 $ErrorActionPreference = "Stop"
@@ -21,7 +24,7 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $pythonw)) { throw "Missing $pythonw. Create the venv first (see README)." }
 
 $cfg = & $python -m jobpilot.scheduled --print-config | ConvertFrom-Json
-$names = @($cfg.tasks.pipeline, $cfg.tasks.weekly)
+$names = @($cfg.tasks.pipeline, $cfg.tasks.weekly, $cfg.tasks.catchup)
 
 if ($Unregister) {
     foreach ($name in $names) {
@@ -47,11 +50,32 @@ $pipelineAction = New-ScheduledTaskAction -Execute $pythonw -Argument "-m jobpil
 $weeklyTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days[$cfg.weekly_day] -At $cfg.weekly_time
 $weeklyAction = New-ScheduledTaskAction -Execute $pythonw -Argument "-m jobpilot.weekly" -WorkingDirectory $root
 
+# Catch-up: sign-in, unlock, and wake from sleep (Power-Troubleshooter 1) or modern standby (Kernel-Power 507).
+$user = "$env:USERDOMAIN\$env:USERNAME"
+$taskNs = "Root/Microsoft/Windows/TaskScheduler"
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$logonTrigger.Delay = "PT2M"
+$unlockTrigger = New-CimInstance -CimClass (Get-CimClass -Namespace $taskNs -ClassName MSFT_TaskSessionStateChangeTrigger) -ClientOnly
+$unlockTrigger.StateChange = 8  # session unlock
+$unlockTrigger.UserId = $user
+$unlockTrigger.Delay = "PT2M"
+$unlockTrigger.Enabled = $true
+$wakeTrigger = New-CimInstance -CimClass (Get-CimClass -Namespace $taskNs -ClassName MSFT_TaskEventTrigger) -ClientOnly
+$wakeTrigger.Subscription = '<QueryList><Query Id="0" Path="System"><Select Path="System">' +
+    "*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]] or " +
+    "*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and EventID=507]]" +
+    '</Select></Query></QueryList>'
+$wakeTrigger.Delay = "PT2M"
+$wakeTrigger.Enabled = $true
+$catchupAction = New-ScheduledTaskAction -Execute $pythonw -Argument "-m jobpilot.scheduled --catch-up" -WorkingDirectory $root
+
 $plan = @(
     @{ Name = $cfg.tasks.pipeline; Trigger = $pipelineTrigger; Action = $pipelineAction
        Text = "daily from $($cfg.start), every $($cfg.every_hours) h for $($cfg.window_minutes / 60) h: search -> score -> docs" },
     @{ Name = $cfg.tasks.weekly; Trigger = $weeklyTrigger; Action = $weeklyAction
-       Text = "every $($days[$cfg.weekly_day]) at $($cfg.weekly_time): weekly answer-review reminder" }
+       Text = "every $($days[$cfg.weekly_day]) at $($cfg.weekly_time): weekly answer-review reminder" },
+    @{ Name = $cfg.tasks.catchup; Trigger = @($logonTrigger, $unlockTrigger, $wakeTrigger); Action = $catchupAction
+       Text = "on sign-in, unlock and wake: search -> score -> docs only if the last search is overdue" }
 )
 foreach ($task in $plan) {
     if ($WhatIf) { "Would register: $($task.Name) ($($task.Text))"; continue }

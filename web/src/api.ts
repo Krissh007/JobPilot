@@ -75,7 +75,7 @@ export interface ScheduledTask {
 
 export interface ScheduleStatus {
   tasks: ScheduledTask[]; error: string; log_tail: string[]; command: string; checked_at: string;
-  config: { tasks: { pipeline: string; weekly: string }; start: string; every_hours: number; window_minutes: number; weekly_day: string; weekly_time: string };
+  config: { tasks: { pipeline: string; weekly: string; catchup: string }; start: string; every_hours: number; window_minutes: number; weekly_day: string; weekly_time: string };
 }
 
 export class ApiError extends Error {

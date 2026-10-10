@@ -65,7 +65,7 @@ def test_schedule_api_reports_tasks_and_registers(client: TestClient, monkeypatc
     monkeypatch.setattr(schedule_router, "powershell", fake_powershell)
     monkeypatch.setitem(schedule_router._cache, "tasks", None)
     body = client.get("/api/schedule").json()
-    assert [t["registered"] for t in body["tasks"]] == [False, False] and "register_tasks.ps1" in body["command"]
+    assert [t["registered"] for t in body["tasks"]] == [False] * len(scheduled.TASKS) and "register_tasks.ps1" in body["command"]
 
     body = client.post("/api/schedule/register").json()
     assert body["output"] == ["Registered: JobPilot Search-Score-Docs"]
@@ -92,3 +92,51 @@ def test_late_runs_outside_the_window_are_skipped():
     assert scheduled.within_window(at(8, 0), "08:00", 840) and scheduled.within_window(at(20, 1), "08:00", 840)
     assert scheduled.within_window(at(22, 25), "08:00", 840)  # missed 20:00 run started a bit late
     assert not scheduled.within_window(at(23, 49), "08:00", 840) and not scheduled.within_window(at(7, 30), "08:00", 840)
+
+
+# ---- catch-up after sleep (10 Oct 2026: Windows skipped 7 runs while the PC slept) ----
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+IST = timezone(timedelta(hours=5, minutes=30))
+CFG = {"start": "08:00", "every_hours": 4, "window_minutes": 840}
+
+
+def ist(hour, minute=0, day=10):
+    return datetime(2026, 10, day, hour, minute, tzinfo=IST)
+
+
+def test_catch_up_runs_when_the_last_search_is_overdue():
+    last = ist(0, 0, day=9).astimezone(timezone.utc)  # slept through the whole of 9 Oct
+    assert scheduled.catch_up_due(ist(14, 13), CFG, last)
+    assert scheduled.catch_up_due(ist(9, 0), CFG, None)  # never searched
+
+
+def test_catch_up_skips_a_recent_search_and_outside_the_window():
+    recent = ist(12, 5).astimezone(timezone.utc)
+    assert not scheduled.catch_up_due(ist(14, 0), CFG, recent)       # under 3.5 h ago
+    assert scheduled.catch_up_due(ist(15, 40), CFG, recent)          # 3 h 35 m: due
+    old = ist(8, 0, day=9).astimezone(timezone.utc)
+    assert not scheduled.catch_up_due(ist(7, 30), CFG, old)          # before 08:00
+    assert not scheduled.catch_up_due(ist(22, 45), CFG, old)         # after 22:30 (window + grace)
+
+
+def test_last_search_started_ignores_other_agents_and_examples(session):
+    from jobpilot.db.models import AgentName, AgentRun
+
+    session.add(AgentRun(agent=AgentName.search, started_at=datetime(2026, 10, 9, 0, 0, tzinfo=timezone.utc)))
+    session.add(AgentRun(agent=AgentName.score, started_at=datetime(2026, 10, 10, 9, 0, tzinfo=timezone.utc)))
+    session.add(AgentRun(agent=AgentName.search, is_example=True,
+                         started_at=datetime(2026, 10, 10, 10, 0, tzinfo=timezone.utc)))
+    session.commit()
+    assert scheduled.last_search_started(session) == datetime(2026, 10, 9, 0, 0, tzinfo=timezone.utc)
+
+
+def test_catch_up_exits_quietly_when_nothing_is_due(monkeypatch):
+    monkeypatch.setattr(scheduled, "config", lambda session=None: {**CFG, "tasks": scheduled.TASKS})
+    monkeypatch.setattr(scheduled, "last_search_started", lambda session=None: datetime.now(timezone.utc))
+    ran = []
+    monkeypatch.setattr(scheduled, "run_pipeline", lambda *a, **k: ran.append(1) or 0)
+    with pytest.raises(SystemExit) as exit_info:
+        scheduled.main(["--catch-up"])
+    assert exit_info.value.code == 0 and ran == []

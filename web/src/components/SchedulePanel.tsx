@@ -37,7 +37,12 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
   });
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(); };
   const times = runTimes(form.start, form.end, form.every_hours);
-  const label = (name: string) => (name === status?.config.tasks.pipeline ? "Search → score → docs" : "Weekly answer review");
+  const label = (name: string) =>
+    name === status?.config.tasks.pipeline
+      ? "Search → score → docs"
+      : name === status?.config.tasks.catchup
+        ? "Catch-up after sleep (sign-in, unlock, wake)"
+        : "Weekly answer review";
 
   return (
     <Panel title="Schedule" actions={<span className="text-[12px] text-muted">{isFetching ? "checking…" : status ? `checked ${when(status.checked_at)}` : ""}</span>}>
