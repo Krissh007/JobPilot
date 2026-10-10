@@ -1,7 +1,9 @@
 # Starts the JobPilot API + dashboard on this computer only: http://127.0.0.1:8000 (API docs at /docs).
 # Usage:  powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\run_api.ps1            # start (or say it's already running)
 #         powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\run_api.ps1 -Restart   # replace a running copy (e.g. after an update)
-param([switch]$Restart)
+#         ... -Verbose   also log every request (the open dashboard polls every few seconds, so this is noisy)
+# By default only warnings and errors are printed, so a real problem stands out.
+param([switch]$Restart, [switch]$Verbose)
 $Root = Split-Path -Parent $PSScriptRoot
 $Port = 8000
 $Url = "http://127.0.0.1:$Port"
@@ -25,5 +27,8 @@ if ($listener) {
     Start-Sleep -Milliseconds 800
 }
 
+$logging = if ($Verbose) { @("--log-level", "info") } else { @("--log-level", "warning", "--no-access-log") }
 Write-Host "Starting JobPilot at $Url  (Ctrl+C to stop)" -ForegroundColor Green
-& "$Root\.venv\Scripts\uvicorn.exe" --app-dir $Root jobpilot.api.main:app --host 127.0.0.1 --port $Port
+if ($Verbose) { Write-Host "Logging every request." -ForegroundColor DarkGray }
+else { Write-Host "Quiet mode: only warnings and errors are shown (add -Verbose to see every request)." -ForegroundColor DarkGray }
+& "$Root\.venv\Scripts\uvicorn.exe" --app-dir $Root jobpilot.api.main:app --host 127.0.0.1 --port $Port @logging

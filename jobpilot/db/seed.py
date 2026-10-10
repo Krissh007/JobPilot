@@ -118,7 +118,8 @@ def seed(session: Session) -> int:
         for step in path:
             set_status(session, job, step, actor=Actor.agent if step in (JobStatus.shortlisted, JobStatus.docs_ready) else Actor.user)
         if target in (JobStatus.applied, JobStatus.interview, JobStatus.offer):
-            job.applied_at = now - timedelta(days=max(days - 1, 0), hours=1)
+            # "applied today" must stay today in IST even just after midnight, so no hour offset for it
+            job.applied_at = now - (timedelta(days=days - 1, hours=1) if days > 1 else timedelta(minutes=1))
         jobs[company] = job
 
     for question, answer, tags in EXAMPLE_ANSWERS:

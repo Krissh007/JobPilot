@@ -243,7 +243,7 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 - Tests: 100 passed.
 
 
-## Phase 9: analytics + UI smoke test (2026-10-10, in progress)
+## Phase 9: analytics + UI smoke test + README (2026-10-10 to 2026-10-11, done)
 - Analytics tab:
   - Stat tiles; pipeline funnel; fit-score histogram (threshold marker, at/above vs below); applications per day (30/90 days).
   - Hover tooltips, keyboard focus and a table view on every chart; examples excluded unless ticked.
@@ -254,4 +254,8 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - The drawer status toast said "Moved to Found" (the stale select value).
   - Settings scrolled sideways on phones (grid children need min-w-0).
 - Tests: 106 passed. Screens: `design/screens/15-analytics-*.png`.
-- Left: README polish (one-server setup, Phase 9 notes).
+- `run_api.ps1`: says JobPilot is already running instead of a port-in-use crash, `-Restart` replaces the running copy, quiet by default (warnings and errors only), `-Verbose` logs every request.
+- README rewritten around daily use and first-time setup, with Naukri, the catch-up task, tests and troubleshooting. New `docs/DESIGN.md`: architecture, data model, lifecycle, apply flow and safety rules, scheduling, testing, known limits.
+
+## Status: all 9 phases done
+Still yours to do: answer the open questions on the Answers tab, and decide when to switch on auto-submit.
