@@ -19,6 +19,24 @@ from jobpilot.legacy import bridge
 
 READY = "ready"
 
+# Find the "Follow <company> as you apply" text, then the checkbox beside it (input or a role=checkbox widget).
+UNTICK_FOLLOW_JS = r"""() => {
+  const label = [...document.querySelectorAll('label, span, p, div')]
+    .filter(e => /follow .{1,120} as you apply/i.test(e.textContent || '') && (e.textContent || '').length < 200).pop();
+  if (!label) return 'not found';
+  let scope = label;
+  for (let i = 0; i < 3 && scope; i++, scope = scope.parentElement) {
+    const box = scope.querySelector("input[type='checkbox'], [role='checkbox']");
+    if (!box) continue;
+    const ticked = box.type === 'checkbox' ? box.checked : box.getAttribute('aria-checked') === 'true';
+    if (!ticked) return 'not ticked';
+    box.click();
+    const still = box.type === 'checkbox' ? box.checked : box.getAttribute('aria-checked') === 'true';
+    return still ? 'left ticked' : 'unticked';
+  }
+  return 'left ticked';
+}"""
+
 
 def naukri_module():
     return bridge.naukri()
@@ -34,6 +52,7 @@ def make_naukri_applier():
             self.records: list[FieldRecord] = []
             self.consent: list[str] = []
             self.unknown: list[str] = []
+            self.follow = ""  # what untick_follow() did, shown in Review
 
         def precheck(self) -> str:
             """READY, or the legacy ALREADY_APPLIED / EXTERNAL / NOT_SIGNED_IN status. Never clicks."""
@@ -54,6 +73,7 @@ def make_naukri_applier():
             button = nk._visible(page, nk.APPLY_BUTTON)
             if button is None:
                 return nk.NOT_CONFIRMED
+            self.follow = self.untick_follow()
             button.click()
             page.wait_for_timeout(3_000)
             nk._check_security(page)
@@ -76,9 +96,24 @@ def make_naukri_applier():
             except Exception:
                 return False
 
+        def untick_follow(self) -> str:
+            """Naukri pre-ticks 'Follow <company> as you apply'. Best effort, never fatal:
+            'unticked', 'not ticked', 'not found' or 'left ticked' (couldn't find its checkbox)."""
+            try:
+                return self.page.evaluate(UNTICK_FOLLOW_JS) or "not found"
+            except Exception:
+                return "not found"
+
+        def _awaits_answer(self, chatbot: Any) -> bool:
+            if nk._visible(chatbot, nk.CHAT_INPUT) is not None:
+                return True
+            return any(option.is_visible() for option in chatbot.locator(nk.CHAT_RADIO).all())
+
         def _answer_one(self, chatbot: Any, result: Any) -> bool:
             messages = chatbot.locator(nk.BOT_MESSAGE).all()
             question = " ".join(messages[-1].inner_text().split()) if messages else ""
+            if not self._awaits_answer(chatbot):
+                return True  # a plain message ("Thank you for your responses."): wait for Naukri's confirmation
             if not question:
                 return False
             if is_consent(question):

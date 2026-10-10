@@ -30,3 +30,16 @@ def test_dedupe_hash_ignores_noise():
 
 def test_dedupe_hash_distinguishes_roles():
     assert dedupe_hash("Acme", "AI Business Analyst", "Hyderabad") != dedupe_hash("Acme", "Product Analyst", "Hyderabad")
+
+
+def test_portal_comes_from_the_link():
+    from jobpilot.db.dedupe import portal_of
+    from jobpilot.legacy.importer import map_row
+
+    assert portal_of("https://www.linkedin.com/jobs/view/4470845808/") == "linkedin"
+    assert portal_of("https://in.linkedin.com/jobs/view/1") == "linkedin"
+    assert portal_of("https://www.naukri.com/job-listings-x-150926500001") == "naukri"
+    assert portal_of("https://notlinkedin.com/x") is None and portal_of("https://careers.acme.com/1") is None
+    job, _ = map_row({"job_url": "https://www.linkedin.com/jobs/view/4470845808/", "title": "BA", "company": "Infor",
+                      "source": "naukri", "status": "new"})  # the legacy feed mislabelled it
+    assert job["source"] == "linkedin"

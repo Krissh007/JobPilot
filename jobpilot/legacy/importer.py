@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 from sqlmodel import Session
 
+from jobpilot.db.dedupe import portal_of
 from jobpilot.db.models import Actor, JobStatus
 from jobpilot.db.repo import upsert_job
 
@@ -105,7 +106,7 @@ def map_row(row: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         "url": url,
         "title": str(row.get("title") or "").strip() or "(untitled)",
         "company": str(row.get("company") or "").strip() or "(unknown)",
-        "source": str(row.get("source") or "").strip().lower(),
+        "source": portal_of(url) or str(row.get("source") or "").strip().lower(),  # the link wins over the feed
         "location": str(row.get("location") or "").strip(),
         "exp_min": exp_min,
         "exp_max": exp_max,

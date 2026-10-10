@@ -25,6 +25,15 @@ COMPANY_SUFFIX = re.compile(
 )
 
 
+def portal_of(url: str) -> str | None:
+    """'linkedin' / 'naukri' from the link's host (more reliable than a feed's source column), else None."""
+    host = urlsplit(str(url or "").strip()).netloc.lower()
+    for portal in ("linkedin", "naukri"):
+        if host == f"{portal}.com" or host.endswith(f".{portal}.com"):
+            return portal
+    return None
+
+
 def canonical_url(url: str) -> str:
     raw = str(url or "").strip()
     parts = urlsplit(raw)

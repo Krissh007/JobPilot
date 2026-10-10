@@ -29,8 +29,12 @@ window.__applies = 0;
 const questions = __QUESTIONS__;
 let q = 0;
 function done() { document.getElementById('chat').innerHTML = '<p>You have successfully applied to AI Business Analyst</p>'; }
+function thanks() {  // like the real Naukri: a closing bot line with nothing to answer, then the confirmation
+  document.getElementById('chat').innerHTML = '<div class="chatbot_Drawer"><div class="botMsg">Thank you for your responses.</div></div>';
+  setTimeout(done, 2500);
+}
 function ask() {
-  if (q >= questions.length) return done();
+  if (q >= questions.length) return questions.length ? thanks() : done();
   document.getElementById('chat').innerHTML =
     '<div class="chatbot_Drawer"><div class="botMsg">' + questions[q] + '</div>' +
     '<textarea id="reply"></textarea><button class="sendMsg">Save</button></div>';
@@ -45,6 +49,8 @@ if (b) b.onclick = () => { window.__applies++; b.remove(); ask(); };
 </script></body></html>"""
 
 APPLY = '<button id="apply-button">Apply</button>'
+FOLLOW = ('<button id="apply-button">Apply</button><div><input type="checkbox" id="fl" checked>'
+          '<label for="fl">Follow Acme as you apply to stay updated</label></div>')
 COMPANY_SITE = '<button id="company-site-button">Apply on company site</button>'
 LOGIN = '<p>Login to apply</p><button id="apply-button">Apply</button>'
 
@@ -196,3 +202,27 @@ def test_signed_out_portal_is_skipped_with_the_login_hint(db_url, naukri_job, ch
         run(db_url, make, FakePacing())
     _, app, _, rec = state(db_url, naukri_job)
     assert app is None and "python -m src.apply.naukri login" in rec.log
+
+
+def test_closing_message_is_not_a_question_and_follow_is_unticked(db_url, naukri_job, chrome):
+    set_auto(db_url, True)
+    make, holder = factory(chrome, buttons=FOLLOW, questions=["What is your notice period?"])
+    seen = {}
+    original = runner.mark_submitted
+
+    def spy(session, app, job, by):
+        seen["follow_checked"] = holder["context"].pages[0].evaluate("document.getElementById('fl') && document.getElementById('fl').checked")
+        return original(session, app, job, by)
+
+    runner.mark_submitted = spy
+    try:
+        run(db_url, make, FakePacing())
+    finally:
+        runner.mark_submitted = original
+    job, app, fields, rec = state(db_url, naukri_job)
+    assert app.state == ApplicationState.submitted and app.reason == "" and "needs you" not in rec.log
+    assert seen["follow_checked"] is False
+    assert {f.field_name: f.value_used for f in fields}["Follow Acme as you apply"] == "unticked by the agent"
+    with Session(get_engine(db_url)) as s:
+        assert not s.exec(select(Answer).where(Answer.question.contains("Thank you"))).all()
+

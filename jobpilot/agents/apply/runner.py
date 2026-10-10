@@ -51,6 +51,7 @@ from jobpilot.db.models import (
     JobStatus,
     utcnow,
 )
+from jobpilot.db.dedupe import portal_of
 from jobpilot.db.repo import get_setting, set_status
 from jobpilot.db.session import get_engine
 from jobpilot.llm.gemini import GeminiClient
@@ -118,6 +119,11 @@ def is_signed_in(browser: Any, source: str = "linkedin") -> bool:
 LOGIN_HINT = {"linkedin": "python -m src.apply.linkedin login", "naukri": "python -m src.apply.naukri login"}
 
 
+def portal(job: Job) -> str:
+    """Which apply flow: from the posting link, falling back to the stored source."""
+    return portal_of(job.url) or job.source
+
+
 def applied_today(session: Session) -> int:
     today = today_ist()
     rows = session.exec(select(Job.applied_at).where(Job.is_example.is_(False), Job.applied_at.is_not(None)))
@@ -168,6 +174,8 @@ def stuck_questions(filler: Any) -> list[str]:
 
 def mark_submitted(session: Session, app: Application, job: Job, by: Actor) -> None:
     app.state, app.decided_at = ApplicationState.submitted, app.decided_at or utcnow()
+    if app.reason == "incomplete":  # finished after all
+        app.reason = ""
     session.add(app)
     set_status(session, job, JobStatus.applied, actor=by)
     session.commit()
@@ -402,6 +410,11 @@ def process_naukri_job(session: Session, browser: Any, job: Job, rec: RunRecorde
     except nk.NaukriSecurityError as error:
         raise blocked(error)
     save_fields(session, app, applier.records, applier.unknown, applier.consent)
+    if applier.follow and applier.follow != "not found":
+        session.add(ApplicationField(application_id=app.id, step=1, field_name=f"Follow {job.company} as you apply",
+                                     value_used={"unticked": "unticked by the agent", "not ticked": "was not ticked"}.get(
+                                         applier.follow, "left ticked (the agent couldn't untick it)"),
+                                     source=FieldSource.resume, needs_review=applier.follow == "left ticked"))
     session.commit()
     if outcome == nk.SUBMITTED:
         mark_submitted(session, app, job, actor)
@@ -450,11 +463,11 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                 return make_drafter(lambda: GeminiClient(on_retry=rec.log), session, resume, job, rec.log)
 
         with browser_factory() as browser:
-            signed_out = {src for src in {job.source for job in jobs} if not is_signed_in(browser, src)}
+            signed_out = {src for src in {portal(job) for job in jobs} if not is_signed_in(browser, src)}
             for src in sorted(signed_out):
                 rec.log(f"Not signed in to {src} in the agent profile; skipping its jobs. "
                         f"In E:\\job_search_agent run: {LOGIN_HINT.get(src, '')} (you type the password).")
-            jobs = [job for job in jobs if job.source not in signed_out]
+            jobs = [job for job in jobs if portal(job) not in signed_out]
             if not jobs:
                 raise RuntimeError(f"Not signed in to {', '.join(sorted(signed_out))} in the agent profile. In "
                                    f"E:\\job_search_agent run: {' / '.join(LOGIN_HINT.get(s, '') for s in sorted(signed_out))}")
@@ -469,7 +482,7 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                     rec.log(f"Pausing {pacing.between_jobs():.0f}s before the next job")
                 rec.processed += 1
                 try:
-                    if job.source == "naukri":
+                    if portal(job) == "naukri":
                         outcome = process_naukri_job(session, browser, job, rec, pacing, auto_submit=auto_submit,
                                                      threshold=threshold, wait_minutes=wait_minutes)
                     else:

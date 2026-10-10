@@ -228,3 +228,16 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - login prompt → blocked; signed-out portal skipped with the hint
   - plus the late-run window test
 - Not yet done: a live Naukri review-mode run. It needs you at the PC to Approve or Skip within 20 min.
+
+### Live Naukri test (2026-10-09 00:01 IST, run #51)
+- Deloitte Shared Services India, Business Analyst (#197, score 93), review mode:
+  - Posting checked, screenshot taken, nothing sent.
+  - You approved at 00:21:06. The agent clicked Apply.
+  - The chat asked "years of experience as Business analyst?" and was answered from your answer bank ("3 years BA, Overall 6+ years.").
+  - Naukri confirmed, and the job is **Applied** (actor: you).
+- Fixed after the test:
+  - The chat's closing "Thank you for your responses." was treated as an unanswerable question. That added a junk open question and flagged the application incomplete for 4 s. A bot line with no box or options is now just a message; the agent waits for the confirmation.
+  - A submitted application drops the `incomplete` flag.
+  - Naukri pre-ticks "Follow <company> as you apply". The agent now unticks it (best effort) before Apply, and Review shows what it did.
+  - The legacy feed mislabelled 2 jobs (#132 Infor said naukri with a LinkedIn link; #210 the reverse). The portal is now taken from the link when importing and when choosing the apply flow, and both rows were relabelled.
+- Tests: 100 passed.
