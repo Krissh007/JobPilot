@@ -10,6 +10,12 @@ export const useRuns = () => useQuery({ queryKey: ["runs"], queryFn: () => api.r
 export const useAnswers = () => useQuery({ queryKey: ["answers"], queryFn: api.answers });
 export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: api.settings });
 export const useSystem = () => useQuery({ queryKey: ["system"], queryFn: api.system });
+export const useFunnel = (examples: boolean) =>
+  useQuery({ queryKey: ["analytics", "funnel", examples], queryFn: () => api.funnel(examples), placeholderData: (p) => p, refetchInterval: 30000 });
+export const useScoreHistogram = (examples: boolean) =>
+  useQuery({ queryKey: ["analytics", "scores", examples], queryFn: () => api.scoreHistogram(examples), placeholderData: (p) => p, refetchInterval: 30000 });
+export const usePerDay = (days: number, examples: boolean) =>
+  useQuery({ queryKey: ["analytics", "per-day", days, examples], queryFn: () => api.perDay(days, examples), placeholderData: (p) => p, refetchInterval: 30000 });
 export const useSchedule = () => useQuery({ queryKey: ["schedule"], queryFn: api.schedule, refetchInterval: 60000 });
 export const useWeekly = () => useQuery({ queryKey: ["weekly"], queryFn: api.weekly, refetchInterval: 60000 });
 export const useTableCounts = () => useQuery({ queryKey: ["tables"], queryFn: api.tableCounts, refetchInterval: 10000 });

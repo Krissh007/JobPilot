@@ -78,6 +78,10 @@ export interface ScheduleStatus {
   config: { tasks: { pipeline: string; weekly: string; catchup: string }; start: string; every_hours: number; window_minutes: number; weekly_day: string; weekly_time: string };
 }
 
+export interface Funnel { stages: { stage: Stage; count: number }[]; rejected: number; total: number }
+export interface ScoreHistogram { bins: { from: number; to: number; count: number }[]; unscored: number; threshold: number }
+export interface PerDay { days: { date: string; count: number }[] }
+
 export class ApiError extends Error {
   constructor(public status: number, public detail: unknown) {
     super(typeof detail === "string" ? detail : (detail as { message?: string })?.message ?? `HTTP ${status}`);
@@ -138,6 +142,9 @@ export const api = {
   tableCounts: () => request<Record<string, number>>("/stats/tables"),
   system: () => request<SystemInfo>("/system"),
   schedule: () => request<ScheduleStatus>("/schedule"),
+  funnel: (examples: boolean) => request<Funnel>(`/analytics/funnel?include_examples=${examples}`),
+  scoreHistogram: (examples: boolean) => request<ScoreHistogram>(`/analytics/score-histogram?include_examples=${examples}`),
+  perDay: (days: number, examples: boolean) => request<PerDay>(`/analytics/applications-per-day?days=${days}&include_examples=${examples}`),
   registerSchedule: (on: boolean) => request<ScheduleStatus & { output: string[] }>(`/schedule/${on ? "register" : "unregister"}`, { method: "POST" }),
   seedExamples: () => request<{ added_jobs: number }>("/examples/seed", { method: "POST" }),
   purgeExamples: () => request<Record<string, number>>("/examples", { method: "DELETE" }),

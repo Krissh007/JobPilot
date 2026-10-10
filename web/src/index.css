@@ -10,6 +10,7 @@
   --accent: #0b6d8f; --accent-soft: #dcedf3; --accent-ink: #ffffff;
   --good: #1b7a4b; --good-soft: #ddf1e6; --warn: #995c00; --warn-soft: #f8ebd5;
   --bad: #b03a2e; --bad-soft: #f8e1de; --violet: #6a52b8;
+  --chart: #0a76a3; --chart-dim: #9aabb4; /* validated: highlight vs de-emphasis (dataviz validator, light) */
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,6 +20,7 @@
     --accent: #52b7dc; --accent-soft: #16323f; --accent-ink: #04202c;
     --good: #52c78e; --good-soft: #133224; --warn: #e5a63f; --warn-soft: #382a12;
     --bad: #f07e72; --bad-soft: #3d1c1a; --violet: #a796ea;
+    --chart: #2b9fd4; --chart-dim: #5c6f7a;
     color-scheme: dark;
   }
 }
@@ -28,6 +30,7 @@
   --accent: #52b7dc; --accent-soft: #16323f; --accent-ink: #04202c;
   --good: #52c78e; --good-soft: #133224; --warn: #e5a63f; --warn-soft: #382a12;
   --bad: #f07e72; --bad-soft: #3d1c1a; --violet: #a796ea;
+  --chart: #2b9fd4; --chart-dim: #5c6f7a; /* validated against the dark surface */
   color-scheme: dark;
 }
 

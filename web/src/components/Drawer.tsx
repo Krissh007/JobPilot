@@ -105,7 +105,10 @@ function JobBody({ job, threshold, onClose, toast }: { job: JobDetail; threshold
           <div className="border-b border-r border-line px-3 py-2">
             <label htmlFor="status" className="block text-[11px] text-muted">Status</label>
             <select id="status" value={job.status} className="-ml-1 w-full bg-transparent font-medium focus:outline-none"
-              onChange={(e) => move.mutate({ id: job.id, status: e.target.value as Stage }, { onSuccess: () => toast(`Moved to ${STAGE_LABEL[e.target.value as Stage]}`) })}>
+              onChange={(e) => {
+                const to = e.target.value as Stage;  // read now: the controlled select snaps back before onSuccess runs
+                move.mutate({ id: job.id, status: to }, { onSuccess: () => toast(`Moved to ${STAGE_LABEL[to]}`) });
+              }}>
               {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
             </select>
           </div>

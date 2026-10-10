@@ -28,7 +28,7 @@ export function Settings() {
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(); };
 
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
+    <div className="grid gap-3 lg:grid-cols-2 [&>*]:min-w-0">
       <Panel title="Scoring and applying">
         <form onSubmit={submit} className="flex flex-col gap-3 p-3.5">
           <div className="grid grid-cols-2 gap-3">

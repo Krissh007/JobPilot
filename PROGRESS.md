@@ -241,3 +241,17 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
   - Naukri pre-ticks "Follow <company> as you apply". The agent now unticks it (best effort) before Apply, and Review shows what it did.
   - The legacy feed mislabelled 2 jobs (#132 Infor said naukri with a LinkedIn link; #210 the reverse). The portal is now taken from the link when importing and when choosing the apply flow, and both rows were relabelled.
 - Tests: 100 passed.
+
+
+## Phase 9: analytics + UI smoke test (2026-10-10, in progress)
+- Analytics tab:
+  - Stat tiles; pipeline funnel; fit-score histogram (threshold marker, at/above vs below); applications per day (30/90 days).
+  - Hover tooltips, keyboard focus and a table view on every chart; examples excluded unless ticked.
+  - Chart colours validated with the dataviz validator in both themes (`--chart`, `--chart-dim`).
+- The API now serves the built dashboard (`web/dist`) at http://127.0.0.1:8000. Windows MIME types for .js/.css are pinned (the registry mapped .js to text/plain).
+- `tests/test_ui_smoke.py`: headless Chrome against the real API and a temp seeded DB. Clicks every screen, moves a job, checks tooltip/table and theme, no console errors, no sideways scroll at 390 px.
+- Bugs it found and fixed:
+  - The drawer status toast said "Moved to Found" (the stale select value).
+  - Settings scrolled sideways on phones (grid children need min-w-0).
+- Tests: 106 passed. Screens: `design/screens/15-analytics-*.png`.
+- Left: README polish (one-server setup, Phase 9 notes).
