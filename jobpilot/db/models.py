@@ -205,6 +205,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "linkedin_easy_apply_only": True,
     # Which agents the scheduled pass runs: "legacy" (search, score, docs) or "redesign" (discover, shortlist, documents).
     "pipeline": "legacy",
+    # Apply agent: a form stuck on missing answers is saved for you to finish (True) or held open and waited on (False).
+    "park_incomplete": True,
     # Partial overrides for the redesign agents (jobpilot.discovery.config.DiscoveryConfig, jobpilot.scoring.gates.GateConfig).
     "discovery": {},
     "scoring": {},

@@ -14,6 +14,13 @@ Submit), screenshot, record every field and where it came from. Then:
 - sign-in, checkpoint, CAPTCHA or OTP page: stop, mark blocked, notify you,
   and leave the browser on that page. Never typed past, never solved.
 
+Stuck forms are PARKED (setting park_incomplete, on by default): when a form can't reach its Submit page
+because an answer isn't in your answer bank (or a consent box is waiting), the agent keeps everything it
+filled, records each field and each blank in the Review queue, tries to save LinkedIn's draft ("Save this
+application?" -> Save, never Discard), closes the tab and moves on to the next job. You finish the blanks on
+LinkedIn / Naukri yourself, submit, then click "I submitted it" in Review. Switch it off to make the agent
+hold the window open and wait for you instead.
+
 Naukri: its "Apply" button IS the submit, so the agent only reads the posting,
 screenshots it and waits for you (or auto-submits under the same rules). After
 Apply, chatbot questions are answered only from your answer bank; anything else
@@ -26,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -61,6 +69,9 @@ from jobpilot.resume import load_resume
 SECURITY_MARKERS = ("checkpoint", "challenge", "captcha", "authwall", "/login", "/uas/")
 SOURCES = ("linkedin", "naukri")
 NEVER_RETRY = ("not_easy_apply", "external")  # the portal sends these to the company's own site
+PARKED = ("draft_saved", "draft_unsaved")  # Application.reason of a form saved for you to finish
+DISMISS_BUTTON = re.compile(r"^\s*(dismiss|close)\s*$", re.IGNORECASE)
+SAVE_BUTTON = re.compile(r"^\s*save( application| draft)?\s*$", re.IGNORECASE)  # never matches "Discard"
 SESSION_COOKIE = "li_at"
 SCREENSHOTS = DATA_DIR / "screenshots"
 OPEN_STATES = (ApplicationState.filling, ApplicationState.pending_review, ApplicationState.approved,
@@ -172,6 +183,52 @@ def stuck_questions(filler: Any) -> list[str]:
         return []
 
 
+def save_draft(page: Any, filler: Any) -> bool:
+    """Close the Easy Apply dialog and answer LinkedIn's "Save this application?" prompt with Save.
+
+    True only if that prompt appeared and Save was clicked. Never clicks Discard. If LinkedIn shows no prompt
+    (nothing worth saving, or a layout change) this returns False and the progress is only in JobPilot's record.
+    """
+    try:
+        dialog = filler._dialog
+        if dialog is None or page.is_closed():
+            return False
+        close = dialog.get_by_role("button", name=DISMISS_BUTTON).first
+        if close.count() == 0:
+            close = page.locator("button[aria-label='Dismiss'], button.artdeco-modal__dismiss").first
+        if close.count() == 0:
+            return False
+        close.click(timeout=5_000)
+        save = page.get_by_role("button", name=SAVE_BUTTON).first
+        save.wait_for(state="visible", timeout=5_000)
+        save.click(timeout=5_000)
+        page.wait_for_timeout(1_000)
+        return True
+    except Exception:
+        return False
+
+
+def park(session: Session, app: Application, job: Job, page: Any, rec: RunRecorder, *, saved: bool,
+         portal_name: str, filled: int, blanks: list[str]) -> str:
+    """Leave a half-filled application for you: state pending_review, reason draft_saved / draft_unsaved, tab closed."""
+    app.state, app.reason = ApplicationState.pending_review, "draft_saved" if saved else "draft_unsaved"
+    session.add(app)
+    session.commit()
+    try:
+        if not page.is_closed():
+            page.close()
+    except Exception:
+        pass
+    where = ("LinkedIn's draft is saved" if saved else
+             "LinkedIn's draft could not be saved; re-enter the filled values from Review" if portal_name == "LinkedIn" else
+             "Naukri keeps the chat on its side, but reopen it soon")
+    left = "; ".join(blanks[:4]) or "a required field the portal did not name"
+    notify("JobPilot: saved for you to finish", f"{job.title} at {job.company}: {len(blanks)} blank(s) need you.")
+    rec.log(f"  #{job.id} {job.title} | {job.company}: PARKED. {filled} field(s) filled and recorded, {where}. "
+            f"Blank for you: {left[:300]}. Finish it on {portal_name}, submit, then click 'I submitted it' in Review.")
+    return "parked"
+
+
 def mark_submitted(session: Session, app: Application, job: Job, by: Actor) -> None:
     app.state, app.decided_at = ApplicationState.submitted, app.decided_at or utcnow()
     if app.reason == "incomplete":  # finished after all
@@ -208,7 +265,8 @@ def wait_for_decision(session: Session, app: Application, page: Any, filler: Any
 
 
 def process_job(session: Session, browser: Any, job: Job, rec: RunRecorder, pacing: Pacing, *,
-                auto_submit: bool, threshold: float, wait_minutes: float, drafter_factory: Callable[[Job], Any]) -> str:
+                auto_submit: bool, threshold: float, wait_minutes: float, drafter_factory: Callable[[Job], Any],
+                park_incomplete: bool = False) -> str:
     easy_apply = easy_apply_module()
     app = Application(job_id=job.id, state=ApplicationState.filling)
     session.add(app)
@@ -280,6 +338,11 @@ def process_job(session: Session, browser: Any, job: Job, rec: RunRecorder, paci
         rec.log(f"  #{job.id} {job.title} | {job.company}: form NOT ready: stuck on step {result.steps}, before the Submit page "
                 f"({summary}). Needs you: {left[:300]}. Finish it yourself in the agent's browser window.")
 
+    if park_incomplete and not ready:
+        blanks = [f for f in consent + unknown if f]
+        return park(session, app, job, page, rec, saved=save_draft(page, filler), portal_name="LinkedIn",
+                    filled=len(filler.records), blanks=blanks)
+
     if auto_submit and trusted and eligible:
         if filler.submit():
             mark_submitted(session, app, job, Actor.agent)
@@ -331,7 +394,7 @@ def close_skipped(session: Session, app: Application, page: Any, job: Job, rec: 
 
 
 def process_naukri_job(session: Session, browser: Any, job: Job, rec: RunRecorder, pacing: Pacing, *,
-                       auto_submit: bool, threshold: float, wait_minutes: float) -> str:
+                       auto_submit: bool, threshold: float, wait_minutes: float, park_incomplete: bool = False) -> str:
     nk = naukri_module()
     app = Application(job_id=job.id, state=ApplicationState.filling)
     session.add(app)
@@ -425,6 +488,9 @@ def process_naukri_job(session: Session, browser: Any, job: Job, rec: RunRecorde
 
     # Apply was clicked but Naukri wants more: hand the open chat to you.
     left = "; ".join((applier.consent + applier.unknown)[:4]) or "Naukri didn't confirm the application"
+    if park_incomplete:
+        return park(session, app, job, page, rec, saved=False, portal_name="Naukri", filled=len(applier.records),
+                    blanks=[q for q in applier.consent + applier.unknown if q])
     app.state, app.reason = ApplicationState.pending_review, "incomplete"
     session.add(app)
     session.commit()
@@ -449,10 +515,12 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
         cap = int(get_setting(session, "daily_apply_cap"))
         auto_submit = bool(get_setting(session, "auto_submit")) and not review_only
         wait_minutes = float(get_setting(session, "review_wait_minutes"))
+        park_incomplete = bool(get_setting(session, "park_incomplete"))
         budget = cap - applied_today(session)
         jobs = select_jobs(session, job_id, threshold)
         rec.log(f"Auto-submit {'ON' if auto_submit else 'OFF'} · threshold {threshold:g} · today {cap - budget}/{cap} applied · "
-                f"{len(jobs)} job(s) queued" + (f" · stop after {limit} filled form(s)" if limit else ""))
+                f"{len(jobs)} job(s) queued" + (f" · stop after {limit} filled form(s)" if limit else "")
+                + (" · stuck forms are parked for you" if park_incomplete else ""))
         filled = 0
         if budget <= 0 or not jobs:
             rec.log("Nothing to do (daily cap reached or no docs_ready LinkedIn/Naukri jobs).")
@@ -484,10 +552,12 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
                 try:
                     if portal(job) == "naukri":
                         outcome = process_naukri_job(session, browser, job, rec, pacing, auto_submit=auto_submit,
-                                                     threshold=threshold, wait_minutes=wait_minutes)
+                                                     threshold=threshold, wait_minutes=wait_minutes,
+                                                     park_incomplete=park_incomplete)
                     else:
                         outcome = process_job(session, browser, job, rec, pacing, auto_submit=auto_submit, threshold=threshold,
-                                              wait_minutes=wait_minutes, drafter_factory=drafter_factory)
+                                              wait_minutes=wait_minutes, drafter_factory=drafter_factory,
+                                              park_incomplete=park_incomplete)
                 except Blocked as error:
                     notify("JobPilot: blocked", f"{error}. The browser is left on that page for you.")
                     rec.log(f"BLOCKED at #{job.id} {job.company}: {error}. Stopping; the window stays open for 15 min.")

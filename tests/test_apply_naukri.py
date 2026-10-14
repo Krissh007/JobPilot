@@ -132,8 +132,15 @@ def test_auto_submit_when_every_chat_answer_is_in_the_bank(db_url, naukri_job, c
     assert "APPLIED on Naukri (auto-submit; 1 chatbot answer(s)" in rec.log and "waiting" not in rec.log.lower()
 
 
+def hold_window_open(db_url):
+    with Session(get_engine(db_url)) as s:
+        put_setting(s, "park_incomplete", False)
+        s.commit()
+
+
 def test_unknown_chat_question_is_left_to_you_and_recorded(db_url, naukri_job, chrome):
     set_auto(db_url, True)
+    hold_window_open(db_url)
     make, holder = factory(chrome, questions=["What is your notice period?", "Rate your Power BI skills out of 10"])
 
     class You(FakePacing):
@@ -155,6 +162,7 @@ def test_unknown_chat_question_is_left_to_you_and_recorded(db_url, naukri_job, c
 
 def test_consent_question_is_never_answered(db_url, naukri_job, chrome):
     set_auto(db_url, True)
+    hold_window_open(db_url)
     with Session(get_engine(db_url)) as s:
         s.add(Answer(question="I agree to the terms and conditions", answer="Yes", tags="t"))
         s.commit()
@@ -226,3 +234,30 @@ def test_closing_message_is_not_a_question_and_follow_is_unticked(db_url, naukri
     with Session(get_engine(db_url)) as s:
         assert not s.exec(select(Answer).where(Answer.question.contains("Thank you"))).all()
 
+
+
+def test_unknown_chat_question_is_parked_with_the_answered_ones_recorded(db_url, naukri_job, chrome):
+    set_auto(db_url, True)   # Naukri's Apply button IS the submit, so the chat only starts with auto-submit or an approval
+    make, holder = factory(chrome, questions=["What is your notice period?", "Rate your Power BI skills out of 10"])
+    run(db_url, make, FakePacing())
+    job, app, fields, rec = state(db_url, naukri_job)
+    assert app.state == ApplicationState.pending_review and app.reason == "draft_unsaved"
+    assert all(p.is_closed() for p in holder["context"].pages)                      # moved on, window not held open
+    by_name = {f.field_name: f for f in fields}
+    assert by_name["What is your notice period?"].value_used == "30 days"            # answered from the bank
+    blank = by_name["Rate your Power BI skills out of 10"]
+    assert blank.value_used == "(empty: needs you)" and blank.needs_review
+    assert job.status == JobStatus.docs_ready and "PARKED" in rec.log and "Naukri keeps the chat" in rec.log
+    with Session(get_engine(db_url)) as s:
+        assert runner.select_jobs(s, None, 60) == []                                # not opened again until you decide
+
+
+def test_consent_question_is_parked_and_never_answered(db_url, naukri_job, chrome):
+    set_auto(db_url, True)
+    with Session(get_engine(db_url)) as s:
+        s.add(Answer(question="I agree to the terms and conditions", answer="Yes", tags="t"))
+        s.commit()
+    make, holder = factory(chrome, questions=["I agree to the terms and conditions of Acme"])
+    run(db_url, make, FakePacing())
+    _, app, fields, _ = state(db_url, naukri_job)
+    assert app.reason == "draft_unsaved" and any(f.value_used.startswith("(not ticked") for f in fields)

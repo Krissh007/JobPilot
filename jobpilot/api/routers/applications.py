@@ -14,9 +14,12 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from jobpilot.api.deps import get_or_404, get_session
-from jobpilot.db.models import AgentName, AgentRun, Application, ApplicationField, ApplicationState, Job, RunStatus, utcnow
+from jobpilot.db.models import (Actor, AgentName, AgentRun, Application, ApplicationField, ApplicationState, Job, JobStatus,
+                                RunStatus, utcnow)
+from jobpilot.db.repo import set_status
 
 router = APIRouter(tags=["applications"])
+PARKED = ("draft_saved", "draft_unsaved")  # see jobpilot.agents.apply.runner.park
 
 
 def serialize(app: Application, session: Session) -> dict[str, Any]:
@@ -60,6 +63,8 @@ def decide(app_id: int, to: ApplicationState, session: Session) -> dict[str, Any
     app = get_or_404(session, Application, app_id)
     if app.state != ApplicationState.pending_review:
         raise HTTPException(409, f"Application {app_id} is '{app.state.value}', not waiting for review")
+    if to == ApplicationState.approved and app.reason in PARKED:
+        raise HTTPException(409, "This form was saved for you to finish on the portal. Submit it there, then use 'I submitted it'.")
     if to == ApplicationState.approved and app.reason == "incomplete":
         raise HTTPException(409, "This form isn't on its Submit page yet. Finish the missing steps in the agent's browser "
                                  "window; Approve unlocks once it reaches Submit, or submit it there yourself.")
@@ -83,3 +88,18 @@ def approve(app_id: int, session: Session = Depends(get_session)) -> dict[str, A
 @router.post("/applications/{app_id}/skip")
 def skip(app_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
     return decide(app_id, ApplicationState.skipped, session)
+
+
+@router.post("/applications/{app_id}/mark-submitted")
+def mark_submitted(app_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """You finished and submitted a saved/parked application on the portal yourself: record it as applied."""
+    app = get_or_404(session, Application, app_id)
+    if app.state != ApplicationState.pending_review:
+        raise HTTPException(409, f"Application {app_id} is '{app.state.value}', not waiting for review")
+    app.state, app.decided_at, app.reason = ApplicationState.submitted, utcnow(), ""
+    session.add(app)
+    job = session.get(Job, app.job_id)
+    if job is not None and not app.is_example:
+        set_status(session, job, JobStatus.applied, actor=Actor.user)
+    session.commit()
+    return serialize(app, session)

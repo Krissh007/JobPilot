@@ -14,15 +14,33 @@ function Card({ app, threshold }: { app: Application; threshold: number }) {
     onSuccess: (a) => { toast(a.state === "approved" ? "Approved. The apply agent will submit it in its browser." : "Skipped."); qc.invalidateQueries({ queryKey: ["applications"] }); },
     onError: (e: Error) => toast(e.message),
   });
+  const submitted = useMutation({
+    mutationFn: () => api.markSubmitted(app.id),
+    onSuccess: () => { toast("Recorded as applied."); qc.invalidateQueries({ queryKey: ["applications"] }); qc.invalidateQueries({ queryKey: ["jobs"] }); qc.invalidateQueries({ queryKey: ["meta"] }); },
+    onError: (e: Error) => toast(e.message),
+  });
   const flagged = app.needs_review;
+  const parked = app.reason === "draft_saved" || app.reason === "draft_unsaved";
   const incomplete = app.reason === "incomplete";
   const naukri = app.job?.source === "naukri";
+  const blanks = app.fields.filter((f) => f.value_used.startsWith("(empty") || f.value_used.startsWith("(not ticked"));
+  const portal = naukri ? "Naukri" : "LinkedIn";
   return (
     <Panel
       title={<span className="flex items-center gap-2">{app.job?.title} · {app.job?.company} <ScoreNum score={app.job?.score ?? null} threshold={threshold} />{app.is_example && <ExampleTag />}</span>}
       actions={<span className="text-[12px] text-muted">paused {ago(app.created_at)} ago</span>}>
       <div className="grid gap-4 p-3.5 lg:grid-cols-[1.25fr_1fr]">
         <div className="flex min-w-0 flex-col gap-3">
+          {parked && (
+            <div role="note" className="rounded-md border border-accent/40 bg-accent/10 p-2.5 text-[12.5px]">
+              <b>Saved for you to finish.</b> The agent filled what it could and moved on. {blanks.length} {blanks.length === 1 ? "item is" : "items are"} left blank (highlighted below).
+              {app.reason === "draft_saved"
+                ? ` ${portal}'s draft is saved: open the job, continue the application, fill the blanks, submit it, then click "I submitted it".`
+                : naukri
+                  ? " Naukri keeps the chat on its side: open the job, answer what is left, then click \"I submitted it\"."
+                  : ` ${portal} did not confirm a saved draft, so re-enter the values listed below, submit it, then click "I submitted it".`}
+            </div>
+          )}
           {incomplete && (
             <div role="note" className="rounded-md border border-warn/40 bg-warn-soft p-2.5 text-[12.5px]">
               <b className="text-warn">Not ready to submit.</b> {naukri ? "Naukri's screening chat asked something your answer bank can't answer (or a consent question). Answer it in the agent's Chrome window; JobPilot records the application when Naukri confirms it." : "The form is stuck before LinkedIn's Submit page: the highlighted rows need you (consent boxes are never ticked by the agent). Finish them in the agent's Chrome window. Approve unlocks once the form reaches Submit, or submit it there yourself and JobPilot records it."}
@@ -50,7 +68,9 @@ function Card({ app, threshold }: { app: Application; threshold: number }) {
             </table>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <Button variant="primary" disabled={decide.isPending || incomplete} title={incomplete ? "Finish the form in the browser window first" : undefined} onClick={() => decide.mutate("approve")}>Approve submit</Button>
+            {parked && app.job && <a href={app.job.url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-md bg-accent px-3 py-1.5 text-[13px] font-semibold text-white no-underline">Open on {portal}</a>}
+            {parked && <Button variant="primary" disabled={submitted.isPending} onClick={() => submitted.mutate()}>I submitted it</Button>}
+            {!parked && <Button variant="primary" disabled={decide.isPending || incomplete} title={incomplete ? "Finish the form in the browser window first" : undefined} onClick={() => decide.mutate("approve")}>Approve submit</Button>}
             <Button disabled={decide.isPending} onClick={() => decide.mutate("skip")}>Skip</Button>
             {app.job && <Button variant="ghost" onClick={() => openJob(app.job!.id)}>Open job</Button>}
           </div>

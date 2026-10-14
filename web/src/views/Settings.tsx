@@ -12,16 +12,16 @@ export function Settings() {
   const { data: system } = useSystem();
   const { toast } = useUI();
   const qc = useQueryClient();
-  const [form, setForm] = useState({ threshold: 60, daily_apply_cap: 10, queries: "", auto_submit: false, review_wait_minutes: 20, day: "mon", time: "09:00", easy_apply_only: true });
+  const [form, setForm] = useState({ threshold: 60, daily_apply_cap: 10, queries: "", auto_submit: false, review_wait_minutes: 20, day: "mon", time: "09:00", easy_apply_only: true, park_incomplete: true });
   useEffect(() => {
     if (settings) setForm({ threshold: settings.threshold, daily_apply_cap: settings.daily_apply_cap, queries: settings.search_queries.join("\n"),
       auto_submit: settings.auto_submit, review_wait_minutes: settings.review_wait_minutes, day: settings.weekly_review.day, time: settings.weekly_review.time,
-      easy_apply_only: settings.linkedin_easy_apply_only });
+      easy_apply_only: settings.linkedin_easy_apply_only, park_incomplete: settings.park_incomplete });
   }, [settings]);
   const save = useMutation({
     mutationFn: () => api.saveSettings({ threshold: form.threshold, daily_apply_cap: form.daily_apply_cap, search_queries: form.queries.split("\n"),
       auto_submit: form.auto_submit, review_wait_minutes: form.review_wait_minutes, weekly_review: { day: form.day, time: form.time },
-      linkedin_easy_apply_only: form.easy_apply_only }),
+      linkedin_easy_apply_only: form.easy_apply_only, park_incomplete: form.park_incomplete }),
     onSuccess: () => { toast("Settings saved"); qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["meta"] }); qc.invalidateQueries({ queryKey: ["schedule"] }); },
     onError: (e: Error) => toast(`Not saved: ${e.message}`),
   });
@@ -47,6 +47,10 @@ export function Settings() {
             <label className="flex items-start gap-2 text-[13px]">
               <input type="checkbox" checked={form.auto_submit} onChange={(e) => setForm({ ...form, auto_submit: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
               <span><b>Auto-submit fully answered applications</b><br /><span className="text-muted">Only Docs-ready LinkedIn and Naukri jobs ≥ threshold where every field came from your resume/profile or answer bank. Anything with a Gemini-drafted, empty or consent answer waits in Review. Naukri chat questions are only ever answered from the answer bank. Off = every application waits for your Approve.</span></span>
+            </label>
+            <label className="mt-2 flex items-start gap-2 text-[13px]">
+              <input type="checkbox" checked={form.park_incomplete} onChange={(e) => setForm({ ...form, park_incomplete: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
+              <span><b>Save stuck applications for me to finish</b><br /><span className="text-muted">When a form needs an answer your answer bank doesn't have, the agent fills everything else, saves LinkedIn's draft, lists the blanks in Review and moves on to the next job. Off = it keeps the browser window open and waits for you.</span></span>
             </label>
             <div className="mt-2 grid grid-cols-3 gap-3">
               <div><label htmlFor="wait" className={labelClass}>Review wait (min)</label><input id="wait" type="number" min={5} max={120} value={form.review_wait_minutes} onChange={(e) => setForm({ ...form, review_wait_minutes: Number(e.target.value) })} className={inputClass} /></div>

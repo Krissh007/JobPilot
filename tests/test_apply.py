@@ -34,7 +34,9 @@ CHECKPOINT_URL = "https://www.linkedin.com/checkpoint/challenge/xyz"
 
 FAKE_PAGE = """<!doctype html><html><body><main>
 <h1>AI Business Analyst</h1><button id="ea">Easy Apply</button>
-<div id="dlg" role="dialog" style="display:none"></div></main>
+<div id="dlg" role="dialog" style="display:none"></div>
+<div id="box" role="alertdialog" style="display:none"><p>Save this application?</p>
+  <button id="discard">Discard</button><button id="save">Save</button></div></main>
 <script>
 window.__submits = 0;
 const steps = [
@@ -49,9 +51,19 @@ const steps = [
   `<p>Review your application</p><button id="submit">Submit application</button>`,
 ];
 let i = 0;
+const PROMPT = __PROMPT__;
 const dlg = document.getElementById('dlg');
+const box = document.getElementById('box');
+document.addEventListener('click', e => {
+  const id = e.target.id;
+  if (id === 'dismiss') {
+    const touched = [...dlg.querySelectorAll('input,textarea')].some(x => x.value);
+    if (touched && PROMPT) box.style.display = 'block'; else dlg.style.display = 'none';
+  }
+  if (id === 'save' || id === 'discard') { fetch('/__' + id); box.style.display = 'none'; dlg.style.display = 'none'; }
+});
 function show() {
-  dlg.innerHTML = steps[i];
+  dlg.innerHTML = '<button aria-label="Dismiss" id="dismiss">x</button>' + steps[i];
   const n = dlg.querySelector('#next, #review');
   if (n) n.onclick = () => {
     const empty = [...dlg.querySelectorAll('[required]')].filter(e => e.type === 'checkbox' ? !e.checked : !e.value);
@@ -82,17 +94,21 @@ def chrome():
         browser.close()
 
 
-def factory(chrome, extra: str = "", signed_in: bool = True, redirect_to_checkpoint: bool = False):
-    holder = {}
+def factory(chrome, extra: str = "", signed_in: bool = True, redirect_to_checkpoint: bool = False, save_prompt: bool = True):
+    holder = {"save": 0, "discard": 0}
 
     @contextmanager
     def make():
         context = chrome.new_context()
         if signed_in:
             context.add_cookies([{"name": "li_at", "value": "test", "domain": ".www.linkedin.com", "path": "/"}])
-        html = FAKE_PAGE.replace("__EXTRA__", extra)
+        html = FAKE_PAGE.replace("__EXTRA__", extra).replace("__PROMPT__", "true" if save_prompt else "false")
 
         def handle(route):
+            for name in ("save", "discard"):
+                if route.request.url.endswith(f"/__{name}"):
+                    holder[name] += 1
+                    return route.fulfill(status=200, body="")
             if redirect_to_checkpoint and "jobs/view" in route.request.url:
                 route.fulfill(status=200, content_type="text/html", body=f"<script>location.href='{CHECKPOINT_URL}'</script>")
             else:
@@ -205,8 +221,15 @@ def test_review_mode_never_submits_without_approval(db_url, world, chrome):
     assert "auto-submit is off" in run.log
 
 
+def hold_window_open(db_url):
+    with Session(get_engine(db_url)) as s:
+        put_setting(s, "park_incomplete", False)
+        s.commit()
+
+
 def test_unanswered_question_becomes_open_question(db_url, world, chrome):
     set_auto(db_url, True)
+    hold_window_open(db_url)
     make, _ = factory(chrome, extra=WHY)
     runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(db_url, decide=ApplicationState.skipped),
                drafter_factory=lambda job: (lambda q, options=None: None))  # resume can't support an answer
@@ -223,6 +246,7 @@ def test_consent_box_is_never_ticked_and_blocks_approve_until_you_finish(db_url,
     from jobpilot.api.routers.applications import decide
 
     set_auto(db_url, True)
+    hold_window_open(db_url)
     with Session(get_engine(db_url)) as s:  # even an answer-bank "Yes" must not tick a consent box
         s.add(Answer(question="consent to collect, store, and process my data", answer="Yes", tags="t"))
         s.commit()
@@ -326,3 +350,103 @@ def test_not_easy_apply_is_remembered(db_url, world, chrome):
     assert app.state == ApplicationState.skipped and app.reason == "not_easy_apply"
     with Session(get_engine(db_url)) as s:
         assert runner.select_jobs(s, None, 60) == []  # never re-opened
+
+
+# ---- parking: fill what we can, save progress, move on --------------------------------
+
+def second_job(db_url, n=2) -> int:
+    with Session(get_engine(db_url)) as s:
+        job, _ = upsert_job(s, {"title": "Product Analyst", "company": f"Beta{n}", "source": "linkedin",
+                                "url": f"https://www.linkedin.com/jobs/view/430000000{n}/", "jd_text": "LLM requirements " * 30,
+                                "score": 75, "status": "docs_ready"})
+        s.commit()
+        return job.id
+
+
+def test_stuck_form_is_parked_with_draft_saved_and_nothing_submitted(db_url, world, chrome):
+    make, holder = factory(chrome, extra=WHY)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    job, app, fields, run = state(db_url, world)
+    assert app.state == ApplicationState.pending_review and app.reason == "draft_saved"
+    assert holder["save"] == 1 and holder["discard"] == 0            # Save clicked, Discard never
+    assert holder["context"].pages == [] or all(p.is_closed() for p in holder["context"].pages)   # tab closed, not held open
+    names = {f.field_name: f for f in fields}
+    assert names["Mobile phone number"].value_used == "9000000000" and not names["Mobile phone number"].needs_review
+    blank = names["Why are you interested in this role?"]
+    assert blank.value_used == "(empty: needs you)" and blank.needs_review    # the blank you fill in yourself
+    assert job.status == JobStatus.docs_ready and "PARKED" in run.log and "draft is saved" in run.log
+    assert run.status == RunStatus.ok and app.screenshot_path
+
+
+def test_parked_form_when_linkedin_offers_no_save_prompt_is_marked_unsaved(db_url, world, chrome):
+    make, holder = factory(chrome, extra=WHY, save_prompt=False)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    _, app, fields, run = state(db_url, world)
+    assert app.reason == "draft_unsaved" and holder["save"] == 0 and holder["discard"] == 0
+    assert "could not be saved" in run.log and any(f.value_used == "(empty: needs you)" for f in fields)
+
+
+def test_consent_box_form_is_parked_and_box_stays_unticked(db_url, world, chrome):
+    make, _ = factory(chrome, extra=CONSENT_BOX)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: None)
+    _, app, fields, _ = state(db_url, world)
+    assert app.state == ApplicationState.pending_review and app.reason in runner.PARKED
+    consent = [f for f in fields if f.value_used.startswith("(not ticked")]
+    assert len(consent) == 1 and consent[0].needs_review
+
+
+def test_a_parked_job_does_not_hold_up_the_next_one(db_url, world, chrome):
+    other = second_job(db_url)
+    make, holder = factory(chrome, extra=WHY)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    with Session(get_engine(db_url)) as s:
+        apps = s.exec(select(Application)).all()
+        assert sorted(a.job_id for a in apps) == sorted([world, other]) and all(a.reason == "draft_saved" for a in apps)
+        assert runner.select_jobs(s, None, 60) == []                   # parked jobs are not opened again
+    assert holder["save"] == 2
+
+
+def test_nothing_is_ever_submitted_while_parking(db_url, world, chrome):
+    set_auto(db_url, True)                                            # even with auto-submit on
+    make, holder = factory(chrome, extra=WHY)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    _, app, _, run = state(db_url, world)
+    assert "SUBMITTED" not in run.log and app.state == ApplicationState.pending_review
+
+
+def test_fully_answered_form_is_still_staged_for_approval_not_parked(db_url, world, chrome):
+    make, _ = factory(chrome)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(db_url, decide=ApplicationState.skipped),
+               drafter_factory=lambda job: (lambda q, options=None: "I am keen on AI products."))
+    _, app, _, run = state(db_url, world)
+    assert "PARKED" not in run.log and "form filled, stopped before Submit" in run.log and app.reason == "skipped_by_you"
+
+
+def test_review_api_parked_application_flow(db_url, world, chrome):
+    from fastapi import HTTPException
+
+    from jobpilot.api.routers.applications import decide, mark_submitted
+
+    make, _ = factory(chrome, extra=WHY)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    with Session(get_engine(db_url)) as s:
+        app = s.exec(select(Application)).one()
+        with pytest.raises(HTTPException) as err:
+            decide(app.id, ApplicationState.approved, s)               # the agent is not holding any form
+        assert err.value.status_code == 409 and "saved for you to finish" in err.value.detail
+        out = mark_submitted(app.id, s)                                # you submitted it on LinkedIn yourself
+        assert out["state"] == "submitted" and out["reason"] == ""
+        job = s.get(Job, world)
+        assert job.status == JobStatus.applied and job.applied_at is not None
+        with pytest.raises(HTTPException):
+            mark_submitted(app.id, s)                                  # not twice
+
+
+def test_skip_works_on_a_parked_application(db_url, world, chrome):
+    from jobpilot.api.routers.applications import decide
+
+    make, _ = factory(chrome, extra=WHY)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    with Session(get_engine(db_url)) as s:
+        app = s.exec(select(Application)).one()
+        assert decide(app.id, ApplicationState.skipped, s)["state"] == "skipped"

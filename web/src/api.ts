@@ -61,7 +61,7 @@ export interface Settings {
   pipeline: "legacy" | "redesign";
   discovery: DiscoveryFilters;
   scoring: { exp_min: number; exp_max: number };
-  auto_submit: boolean; review_wait_minutes: number; linkedin_easy_apply_only: boolean;
+  auto_submit: boolean; park_incomplete: boolean; review_wait_minutes: number; linkedin_easy_apply_only: boolean;
   weekly_review: { day: string; time: string }; answers_reviewed_at: string | null;
 }
 
@@ -137,6 +137,7 @@ export const api = {
   openFolder: (id: number) => request<{ opened: string }>(`/jobs/${id}/open-folder`, { method: "POST" }),
   applications: (states?: string[]) => request<Application[]>(`/applications${states?.length ? "?" + states.map((s) => `state=${s}`).join("&") : ""}`),
   decide: (id: number, decision: "approve" | "skip") => request<Application>(`/applications/${id}/${decision}`, { method: "POST" }),
+  markSubmitted: (id: number) => request<Application>(`/applications/${id}/mark-submitted`, { method: "POST" }),
   runs: (limit = 50) => request<Run[]>(`/runs?limit=${limit}`),
   run: (id: number) => request<Run>(`/runs/${id}`),
   startRun: (agent: AgentName, options: Record<string, unknown> = {}) => request<Run>(`/runs/${agent}`, { method: "POST", ...json(options) }),
