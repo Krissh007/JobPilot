@@ -10,7 +10,10 @@ Agent 2: Scoring & Shortlisting (the redesign). Runs alongside the old `score` a
 2. No rule-score floor: the legacy 45 floor is gone and legacy_score is ignored.
 3. Gemini is the sole judge of everything that passes. score >= `threshold` (60) moves found -> shortlisted;
    below it the job stays `found` with its score set, so it is not scored twice.
-4. Non-AI roles are capped at 59 in code (not just in the prompt), so they always fall under the threshold.
+4. Gemini places each job in an AI tier: core (no cap), adjacent = working on AI products/platforms or ML-driven
+   analytics (no cap), non_ai (capped at 59 in code, not just in the prompt). The tier is stored in score_reason.
+5. --job-ids re-scores exactly those jobs; a shortlisted job that drops below the threshold goes back to `found`
+   (unless documents already exist).
 
 agent_runs.found = jobs shortlisted, processed = jobs scored by Gemini.
 """
@@ -35,8 +38,11 @@ from jobpilot.resume import Resume, load_resume
 from jobpilot.experience import experience_from_jd
 from jobpilot.scoring.gates import GATE_PREFIX, GateConfig, check_gates
 
-PROMPT_VERSION = "shortlist:v1"
+PROMPT_VERSION = "shortlist:v2"  # v2: three AI tiers replace the ai_role yes/no
 NON_AI_CAP = 59  # strictly below the shortlist threshold (60)
+TIERS = ("core", "adjacent", "non_ai")
+TIER_LABEL = {"core": "AI-core", "adjacent": "AI-adjacent", "non_ai": "non-AI"}
+TIER_TAG = "[Tier: "  # score_reason ends with "[Tier: AI-core]"; the dashboard and tier_of() read it back
 
 SYSTEM = """You are a strict recruiter screening jobs for one candidate (about 3-5 years of experience).
 Score how well the candidate's resume fits the job description. Use only facts in the resume;
@@ -44,15 +50,20 @@ never assume skills or experience it does not show.
 
 Return JSON only, exactly this shape:
 {"score": int 0-100, "skills": int 0-100, "experience": int 0-100, "domain": int 0-100,
- "ai_role": true or false,
+ "ai_tier": "core" | "adjacent" | "non_ai",
  "reason": "one or two sentences, max 300 characters",
  "matched_skills": ["skill from the JD the resume demonstrates", ...],
  "missing_skills": ["skill the JD requires that the resume does not show", ...]}
 
-- ai_role: true only if the role's OWN responsibilities or requirements centre on AI, ML, GenAI/LLM,
-  data-science or data-product work. Judge from the responsibilities and requirements ONLY. Ignore portal
-  metadata (e.g. "Department: Data Science & Analytics"), the "About company" section and taglines: a generic
-  BA role at an AI company is false.
+- ai_tier: how AI-related the role's OWN responsibilities and requirements are. Judge from those ONLY. Ignore
+  portal metadata (e.g. "Department: Data Science & Analytics"), the "About company" section and taglines: a
+  generic BA role at an AI company is still non_ai.
+  "core"     = the work is building, evaluating or applying AI/ML/GenAI/LLM models, or data science / ML engineering.
+  "adjacent" = the work is ON AI products or platforms (requirements, analysis, product ownership or delivery for
+               an AI product, AI tooling or ML platform) or analytics that is driven by ML models (predictive or
+               ML-based analytics, AI-assisted analysis as a main part of the job). Using AI tools for
+               convenience does not count.
+  "non_ai"   = neither: generic business, product, BI/reporting, data or functional analysis with no AI/ML work.
 - skills: overlap between required skills/tools and those the resume demonstrates.
 - experience: fit of the candidate's years and seniority to the JD's range (3-7 years is acceptable;
   far outside it scores low).
@@ -60,8 +71,8 @@ Return JSON only, exactly this shape:
   with some AI/ML exposure; 40-60 generic business or product analysis; below 40 an unrelated specialism
   (SAP functional, Guidewire, insurance core systems, sales).
 - score: overall fit, roughly 0.45*skills + 0.30*experience + 0.25*domain, adjusted for hard blockers
-  (a mandatory certification, 8+ years required). If ai_role is false the score will be capped, so score honestly.
-  The reason must name the AI/ML work in the responsibilities, or say there is none.
+  (a mandatory certification, 8+ years required). A "non_ai" score is capped, so score honestly.
+  The reason must name the AI/ML work in the responsibilities (and why it is core or adjacent), or say there is none.
 Lists: at most 12 items each, short skill names."""
 
 
@@ -70,10 +81,19 @@ class ShortlistScore(BaseModel):
     skills: int = Field(ge=0, le=100)
     experience: int = Field(ge=0, le=100)
     domain: int = Field(ge=0, le=100)
-    ai_role: bool
+    ai_tier: str
     reason: str = Field(min_length=1)
     matched_skills: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list)
+
+    @field_validator("ai_tier", mode="before")
+    @classmethod
+    def _tier(cls, value: object) -> str:
+        key = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+        key = {"ai_core": "core", "ai_adjacent": "adjacent", "non_ai": "non_ai", "nonai": "non_ai", "none": "non_ai"}.get(key, key)
+        if key not in TIERS:
+            raise ValueError(f"ai_tier must be one of {', '.join(TIERS)}")
+        return key
 
     @field_validator("reason")
     @classmethod
@@ -87,7 +107,7 @@ class ShortlistScore(BaseModel):
 
     @property
     def final_score(self) -> int:
-        return self.score if self.ai_role else min(self.score, NON_AI_CAP)
+        return min(self.score, NON_AI_CAP) if self.ai_tier == "non_ai" else self.score
 
 
 def ask_with_retry(client: JSONClient, prompt: str) -> ShortlistScore:
@@ -99,6 +119,13 @@ def ask_with_retry(client: JSONClient, prompt: str) -> ShortlistScore:
         problem = str(error).splitlines()[0][:300]
         retry = f"{prompt}\n\nYour previous reply was rejected: {problem}\nReturn only the JSON object described."
         return ShortlistScore.model_validate(client.generate_json(SYSTEM, retry))
+
+
+def tier_of(job: Job) -> str:
+    """'AI-core' / 'AI-adjacent' / 'non-AI' from the tag written at scoring time, '' if never scored by this agent."""
+    reason = job.score_reason or ""
+    start = reason.rfind(TIER_TAG)
+    return reason[start + len(TIER_TAG): reason.find("]", start)] if start >= 0 else ""
 
 
 def apply_gates(session: Session, rec: RunRecorder, gates: GateConfig, dry_run: bool = False) -> int:
@@ -125,7 +152,9 @@ def apply_gates(session: Session, rec: RunRecorder, gates: GateConfig, dry_run: 
     return total
 
 
-def select_jobs(session: Session, limit: int, job_id: int | None) -> list[Job]:
+def select_jobs(session: Session, limit: int, job_id: int | None, job_ids: list[int] | None = None) -> list[Job]:
+    if job_ids:
+        return [j for j in (session.get(Job, i) for i in job_ids) if j is not None and not j.is_example]
     if job_id is not None:
         job = session.get(Job, job_id)
         return [job] if job else []
@@ -140,23 +169,26 @@ def select_jobs(session: Session, limit: int, job_id: int | None) -> list[Job]:
 def apply_result(session: Session, job: Job, result: ShortlistScore, resume: Resume, threshold: float) -> bool:
     job.score, job.score_skills = result.final_score, result.skills
     job.score_experience, job.score_domain = result.experience, result.domain
-    job.score_reason = result.reason + ("" if result.ai_role else " [Capped: not an AI role]")
+    job.score_reason = (f"{result.reason}{' [Capped: non-AI]' if result.final_score != result.score else ''} "
+                        f"{TIER_TAG}{TIER_LABEL[result.ai_tier]}]")
     job.skills = result.matched_skills
     job.resume_version = resume.version
     session.add(job)
     if job.status == JobStatus.found and result.final_score >= threshold:
         return set_status(session, job, JobStatus.shortlisted, actor=Actor.agent)
+    if job.status == JobStatus.shortlisted and result.final_score < threshold and not job.resume_path:
+        set_status(session, job, JobStatus.found, actor=Actor.agent)   # a re-score can take a job back out (never once documents exist)
     return False
 
 
 def shortlist_jobs(session: Session, rec: RunRecorder, client: JSONClient | None, resume: Resume,
-                   limit: int = 20, job_id: int | None = None, dry_run: bool = False) -> None:
+                   limit: int = 20, job_id: int | None = None, dry_run: bool = False, job_ids: list[int] | None = None) -> None:
     gates = GateConfig(**(get_setting(session, "scoring") or {}))
     threshold = float(get_setting(session, "threshold"))
     apply_gates(session, rec, gates, dry_run)
     if dry_run:
         return
-    jobs = select_jobs(session, limit, job_id)
+    jobs = select_jobs(session, limit, job_id, job_ids)
     no_jd = session.exec(select(func.count()).select_from(Job).where(
         Job.status == JobStatus.found, Job.score.is_(None), Job.is_example.is_(False),
         func.length(Job.jd_text) < MIN_JD_CHARS)).one()
@@ -191,30 +223,31 @@ def shortlist_jobs(session: Session, rec: RunRecorder, client: JSONClient | None
         session.commit()
         rec.processed += 1
         rec.found += shortlisted
-        capped = "" if result.ai_role else " capped"
-        rec.log(f"  #{job.id} {result.final_score:>3}{capped} (S{result.skills}/E{result.experience}/D{result.domain}) "
+        capped = " capped" if result.final_score != result.score else ""
+        rec.log(f"  #{job.id} {result.final_score:>3}{capped} [{TIER_LABEL[result.ai_tier]}] (S{result.skills}/E{result.experience}/D{result.domain}) "
                 f"{job.title} | {job.company} [{origin}]{' -> shortlisted' if shortlisted else ''}")
     if failed:
         rec.log(f"{failed} job(s) could not be scored (invalid output after one retry); they stay unscored")
 
 
 def run(limit: int = 20, job_id: int | None = None, db_url: str | None = None, client: JSONClient | None = None,
-        run_id: int | None = None, dry_run: bool = False) -> None:
+        run_id: int | None = None, dry_run: bool = False, job_ids: list[int] | None = None) -> None:
     with agent_run(AgentName.score, db_url, run_id) as rec:
         resume = None if dry_run else load_resume()
         with Session(get_engine(db_url)) as session:
-            shortlist_jobs(session, rec, client, resume, limit, job_id, dry_run)
+            shortlist_jobs(session, rec, client, resume, limit, job_id, dry_run, job_ids)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, default=20, help="Max Gemini calls this run (free-tier friendly)")
     parser.add_argument("--job-id", type=int, help="Score (or re-score) one job")
+    parser.add_argument("--job-ids", type=int, nargs="+", help="Re-score exactly these jobs (e.g. after a prompt change)")
     parser.add_argument("--dry-run", action="store_true", help="Report gate rejections only; no Gemini, no writes")
     parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
-        run(args.limit, args.job_id, run_id=args.run_id, dry_run=args.dry_run)
+        run(args.limit, args.job_id, run_id=args.run_id, dry_run=args.dry_run, job_ids=args.job_ids)
     except Exception:
         sys.exit(1)
 

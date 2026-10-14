@@ -11,7 +11,7 @@ from jobpilot.llm.gemini import QuotaExhausted
 from jobpilot.resume import Resume
 from jobpilot.scoring.gates import GATE_PREFIX, GateConfig, check_gates, experience_gate, india_gate
 
-AI = {"score": 78, "skills": 80, "experience": 75, "domain": 80, "ai_role": True, "reason": "Owns LLM feature requirements.",
+AI = {"score": 78, "skills": 80, "experience": 75, "domain": 80, "ai_tier": "core", "reason": "Owns LLM feature requirements.",
       "matched_skills": ["SQL"], "missing_skills": []}
 JD = "We need an AI Business Analyst to own requirements for LLM features, write BRDs and analyse data in SQL. " * 3
 
@@ -118,20 +118,20 @@ def test_threshold_60_boundary(db_url):
 
 def test_non_ai_role_capped_below_threshold_even_if_gemini_scores_high(db_url):
     job_id = add_job(db_url, title="Business Analyst")
-    shortlist.run(db_url=db_url, client=FakeClient({**AI, "score": 92, "ai_role": False}))
+    shortlist.run(db_url=db_url, client=FakeClient({**AI, "score": 92, "ai_tier": "non_ai"}))
     job = get(db_url, job_id)
     assert job.score == 59 and job.status == JobStatus.found and "Capped" in job.score_reason
 
 
-def test_ai_role_not_capped(db_url):
+def test_ai_core_not_capped(db_url):
     job_id = add_job(db_url)
     shortlist.run(db_url=db_url, client=FakeClient({**AI, "score": 95}))
     assert get(db_url, job_id).score == 95
 
 
-def test_missing_ai_role_field_is_invalid_then_retried(db_url):
+def test_missing_ai_tier_field_is_invalid_then_retried(db_url):
     job_id = add_job(db_url)
-    bad = {k: v for k, v in AI.items() if k != "ai_role"}
+    bad = {k: v for k, v in AI.items() if k != "ai_tier"}
     client = FakeClient(bad, AI)
     shortlist.run(db_url=db_url, client=client)
     assert len(client.prompts) == 2 and "rejected" in client.prompts[1] and get(db_url, job_id).score == 78
@@ -204,3 +204,97 @@ def test_gate_note_has_fixed_prefix(db_url):
     job_id = add_job(db_url, location="Paris", notes="my own note")
     shortlist.run(db_url=db_url, client=FakeClient())
     assert get(db_url, job_id).notes == "my own note\nGate: not India (Paris)"
+
+
+# ---- three AI tiers --------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,label", [("core", "AI-core"), ("adjacent", "AI-adjacent"), ("non_ai", "non-AI"),
+                                       ("AI-adjacent", "AI-adjacent"), ("Non AI", "non-AI"), ("ai_core", "AI-core")])
+def test_tier_is_stored_and_readable(db_url, raw, label):
+    job_id = add_job(db_url)
+    shortlist.run(db_url=db_url, client=FakeClient({**AI, "ai_tier": raw}))
+    job = get_job_row(db_url, job_id)
+    assert shortlist.tier_of(job) == label and job.score_reason.endswith(f"[Tier: {label}]")
+
+
+def get_job_row(db_url, ident):
+    return get(db_url, ident)
+
+
+def new_prompt(db_url):
+    """What a prompt-version bump does: earlier Gemini answers are no longer reused."""
+    from jobpilot.db.models import LLMCache
+
+    with Session(get_engine(db_url)) as s:
+        for row in s.exec(select(LLMCache)):
+            s.delete(row)
+        s.commit()
+
+
+def test_adjacent_is_not_capped_but_non_ai_is(db_url):
+    adjacent = add_job(db_url, jd_text=JD + " ADJ")
+    non_ai = add_job(db_url, jd_text=JD + " NON")
+
+    class ByJD:
+        def generate_json(self, system, prompt):
+            return {**AI, "score": 90, "ai_tier": "adjacent" if " ADJ" in prompt else "non_ai"}
+
+    shortlist.run(db_url=db_url, client=ByJD())
+    a, n = get(db_url, adjacent), get(db_url, non_ai)
+    assert (a.score, a.status) == (90, JobStatus.shortlisted)
+    assert (n.score, n.status) == (59, JobStatus.found) and "[Capped: non-AI]" in n.score_reason
+
+
+def test_unknown_tier_value_is_invalid_then_retried(db_url):
+    job_id = add_job(db_url)
+    client = FakeClient({**AI, "ai_tier": "maybe"}, {**AI, "ai_tier": "adjacent"})
+    shortlist.run(db_url=db_url, client=client)
+    assert len(client.prompts) == 2 and shortlist.tier_of(get(db_url, job_id)) == "AI-adjacent"
+
+
+def test_old_prompt_cache_is_not_reused_after_the_tier_change():
+    assert shortlist.PROMPT_VERSION == "shortlist:v2"
+
+
+def test_rescore_by_ids_updates_tier_and_can_promote(db_url):
+    job_id = add_job(db_url)
+    shortlist.run(db_url=db_url, client=FakeClient({**AI, "score": 55, "ai_tier": "non_ai"}))
+    assert get(db_url, job_id).status == JobStatus.found
+    new_prompt(db_url)
+    shortlist.run(db_url=db_url, job_ids=[job_id], client=FakeClient({**AI, "score": 80, "ai_tier": "adjacent"}))
+    job = get(db_url, job_id)
+    assert job.score == 80 and job.status == JobStatus.shortlisted and shortlist.tier_of(job) == "AI-adjacent"
+
+
+def test_rescore_demotes_a_shortlisted_job_that_no_longer_qualifies(db_url):
+    job_id = add_job(db_url)
+    shortlist.run(db_url=db_url, client=FakeClient(AI))
+    assert get(db_url, job_id).status == JobStatus.shortlisted
+    new_prompt(db_url)
+    shortlist.run(db_url=db_url, job_ids=[job_id], client=FakeClient({**AI, "score": 90, "ai_tier": "non_ai"}))
+    job = get(db_url, job_id)
+    assert job.status == JobStatus.found and job.score == 59
+    with Session(get_engine(db_url)) as s:
+        last = s.exec(select(StatusHistory).where(StatusHistory.job_id == job_id).order_by(StatusHistory.id.desc())).first()
+    assert (last.from_status, last.to_status, last.actor) == (JobStatus.shortlisted, JobStatus.found, Actor.agent)
+
+
+def test_rescore_never_demotes_once_documents_exist(db_url):
+    job_id = add_job(db_url)
+    shortlist.run(db_url=db_url, client=FakeClient(AI))
+    with Session(get_engine(db_url)) as s:
+        job = s.get(Job, job_id)
+        job.resume_path = "C:/x/resume.docx"
+        s.add(job)
+        s.commit()
+    shortlist.run(db_url=db_url, job_ids=[job_id], client=FakeClient({**AI, "score": 20, "ai_tier": "non_ai"}))
+    assert get(db_url, job_id).status == JobStatus.shortlisted
+
+
+def test_rescore_only_touches_the_ids_given(db_url):
+    a, b = add_job(db_url), add_job(db_url, jd_text=JD + " B")
+    shortlist.run(db_url=db_url, client=FakeClient(AI, AI))
+    new_prompt(db_url)
+    client = FakeClient({**AI, "score": 70, "ai_tier": "adjacent"})
+    shortlist.run(db_url=db_url, job_ids=[a], client=client)
+    assert len(client.prompts) == 1 and get(db_url, a).score == 70 and get(db_url, b).score == 78
