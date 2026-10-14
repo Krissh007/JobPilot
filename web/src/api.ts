@@ -49,9 +49,18 @@ export interface Run {
 
 export interface Answer { id: number; question: string; answer: string; tags: string; times_used: number; created_at: string; updated_at: string; is_example: boolean }
 
+export interface DiscoveryFilters {
+  keywords: string[]; use_variants: boolean; variants: string[]; locations: string[]; sources: string[];
+  max_posted_days: number; max_cards_per_query: number; max_pages_per_query: number; enrich_per_query: number;
+  backlog_budget: number; naukri_sort_param: string;
+}
+
 export interface Settings {
   threshold: number; daily_apply_cap: number; search_queries: string[];
-  schedule: { every_hours: number; start: string; end: string; timezone: string };
+  schedule: { every_hours: number; start: string; end: string; timezone: string; days: string[]; times: string[] };
+  pipeline: "legacy" | "redesign";
+  discovery: DiscoveryFilters;
+  scoring: { exp_min: number; exp_max: number };
   auto_submit: boolean; review_wait_minutes: number; linkedin_easy_apply_only: boolean;
   weekly_review: { day: string; time: string }; answers_reviewed_at: string | null;
 }

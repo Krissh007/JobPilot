@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useSettings, useSystem } from "../data";
+import { FiltersPanel } from "../components/FiltersPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { useUI } from "../state";
 import { Button, Empty, Panel, cx, inputClass, labelClass } from "../ui";
@@ -59,6 +60,7 @@ export function Settings() {
       </Panel>
       <div className="flex flex-col gap-3">
         <SchedulePanel settings={settings} />
+        <FiltersPanel settings={settings} />
         <Panel title="Gemini and paths">
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 p-3.5 text-[12.5px]">
             <dt className="text-muted">API key</dt><dd className={cx("m-0", system?.gemini_key_set ? "text-good" : "text-bad")}>{system ? (system.gemini_key_set ? "set in .env (hidden)" : "missing: add GEMINI_API_KEY to .env") : "…"}</dd>

@@ -7,6 +7,9 @@ import { Button, Panel, cx, inputClass, labelClass, when } from "../ui";
 
 const DAY = { mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday" } as Record<string, string>;
 
+const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const parseTimes = (text: string) => [...new Set(text.split(/[\s,]+/).filter(Boolean))].sort();
+
 function runTimes(start: string, end: string, every: number): string[] {
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
@@ -21,12 +24,13 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
   const { toast } = useUI();
   const qc = useQueryClient();
   const [form, setForm] = useState(settings.schedule);
+  const [timesText, setTimesText] = useState(settings.schedule.times.join(", "));
   const [changed, setChanged] = useState(false);
-  useEffect(() => setForm(settings.schedule), [settings.schedule]);
+  useEffect(() => { setForm(settings.schedule); setTimesText(settings.schedule.times.join(", ")); }, [settings.schedule]);
 
   const registered = status?.tasks.some((t) => t.registered) ?? false;
   const save = useMutation({
-    mutationFn: () => api.saveSettings({ schedule: form }),
+    mutationFn: () => api.saveSettings({ schedule: { ...form, times: parseTimes(timesText) } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["schedule"] }); setChanged(registered); toast(registered ? "Saved. Click Update tasks to apply it to Windows." : "Schedule saved"); },
     onError: (e: Error) => toast(`Not saved: ${e.message}`),
   });
@@ -36,10 +40,18 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
     onError: (e: Error) => toast(e.message),
   });
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(); };
-  const times = runTimes(form.start, form.end, form.every_hours);
+  const explicit = parseTimes(timesText);
+  const times = explicit.length ? explicit : runTimes(form.start, form.end, form.every_hours);
+  const toggleDay = (d: string) => setForm({ ...form, days: form.days.includes(d) ? form.days.filter((x) => x !== d) : [...form.days, d] });
+  const redesign = settings.pipeline === "redesign";
+  const pipe = useMutation({
+    mutationFn: (value: Settings["pipeline"]) => api.saveSettings({ pipeline: value }),
+    onSuccess: (_r, value) => { qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["schedule"] }); toast(`Scheduled runs now use the ${value} agents`); },
+    onError: (e: Error) => toast(`Not saved: ${e.message}`),
+  });
   const label = (name: string) =>
     name === status?.config.tasks.pipeline
-      ? "Search → score → docs"
+      ? (redesign ? "Discover → shortlist → documents" : "Search → score → docs")
       : name === status?.config.tasks.catchup
         ? "Catch-up after sleep (sign-in, unlock, wake)"
         : "Weekly answer review";
@@ -47,13 +59,33 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
   return (
     <Panel title="Schedule" actions={<span className="text-[12px] text-muted">{isFetching ? "checking…" : status ? `checked ${when(status.checked_at)}` : ""}</span>}>
       <div className="flex flex-col gap-3 p-3.5 text-[12.5px]">
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="sch-pipe" className="text-[11px] font-semibold uppercase tracking-[.07em] text-muted">Agents</label>
+          <select id="sch-pipe" value={settings.pipeline} disabled={pipe.isPending} onChange={(e) => pipe.mutate(e.target.value as Settings["pipeline"])} className={cx(inputClass, "w-auto")}>
+            <option value="legacy">Legacy: search, score, docs</option>
+            <option value="redesign">Redesign: discover, shortlist, documents</option>
+          </select>
+          <span className="text-[11.5px] text-muted">Takes effect on the next scheduled run; nothing to re-register.</span>
+        </div>
         <form onSubmit={submit} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
           <div><label htmlFor="sch-every" className={labelClass}>Every (h)</label><input id="sch-every" type="number" min={1} max={24} value={form.every_hours} onChange={(e) => setForm({ ...form, every_hours: Number(e.target.value) })} className={inputClass} /></div>
           <div><label htmlFor="sch-start" className={labelClass}>From (IST)</label><input id="sch-start" type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className={inputClass} /></div>
           <div><label htmlFor="sch-end" className={labelClass}>Until</label><input id="sch-end" type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className={inputClass} /></div>
-          <Button type="submit" disabled={save.isPending}>Save</Button>
+          <Button type="submit" disabled={save.isPending || form.days.length === 0}>Save</Button>
+          <div className="col-span-4">
+            <label htmlFor="sch-times" className={labelClass}>Exact run times (optional, replaces the interval above)</label>
+            <input id="sch-times" placeholder="e.g. 09:30, 18:00" value={timesText} onChange={(e) => setTimesText(e.target.value)} className={inputClass} />
+          </div>
+          <fieldset className="col-span-4 m-0 flex flex-wrap items-center gap-1.5 border-0 p-0">
+            <legend className={cx(labelClass, "mb-1")}>Run on</legend>
+            {DAY_KEYS.map((d) => (
+              <label key={d} className={cx("cursor-pointer rounded-md border px-2 py-1 text-[12px] capitalize", form.days.includes(d) ? "border-accent bg-accent/10 font-semibold" : "border-line text-muted")}>
+                <input type="checkbox" className="sr-only" checked={form.days.includes(d)} onChange={() => toggleDay(d)} />{d}
+              </label>
+            ))}
+          </fieldset>
         </form>
-        <p className="m-0 text-muted">Runs at <b className="num text-fg">{times.join(", ") || "—"}</b>: search, then score, then docs. Apply is never scheduled (it opens a browser and waits for you). Weekly reminder: <b className="text-fg">{DAY[settings.weekly_review.day]} {settings.weekly_review.time}</b>.</p>
+        <p className="m-0 text-muted">Runs {form.days.length === 7 ? "every day" : <b className="text-fg">{form.days.join(", ")}</b>} at <b className="num text-fg">{times.join(", ") || "—"}</b>: {redesign ? "discover, then shortlist, then documents" : "search, then score, then docs"}. Apply is never scheduled (it opens a browser and waits for you). Weekly reminder: <b className="text-fg">{DAY[settings.weekly_review.day]} {settings.weekly_review.time}</b>.</p>
 
         <div className="overflow-x-auto rounded-md border border-line">
           <table className="w-full min-w-[420px] border-collapse">

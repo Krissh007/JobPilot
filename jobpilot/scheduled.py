@@ -1,6 +1,10 @@
 """
 The scheduled pipeline Windows Task Scheduler runs (Phase 8): search -> score -> docs.
 
+Which agents run is the `pipeline` setting: "legacy" (search, score, docs) or "redesign"
+(discover, shortlist, documents). When it runs is the `schedule` setting: a start/end window
+repeated every N hours, or an explicit list of run times, on the chosen days of the week.
+
     python -m jobpilot.scheduled                  # one pass now, any time
     python -m jobpilot.scheduled --log            # what the task runs: logs to a file, skips late runs
     python -m jobpilot.scheduled --catch-up       # on sign-in/unlock/wake: a pass only if one is overdue
@@ -35,6 +39,9 @@ LOCK = DATA_DIR / "scheduled.lock"
 LOG = DATA_DIR / "logs" / "scheduled.log"
 TASKS = {"pipeline": "JobPilot Search-Score-Docs", "weekly": "JobPilot Weekly-Answer-Review",
          "catchup": "JobPilot Catch-up"}
+ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+LATE_TIMES_GRACE = 90      # explicit-times mode: a run Windows starts this many minutes after its time still counts
+CATCH_UP_TIMES_MAX = 240   # explicit-times mode: a time this recent (minutes) can still be caught up
 # A catch-up pass runs when the last search started at least this long before one interval ends,
 # so a wake shortly before a regular run doesn't start a duplicate pass.
 CATCH_UP_SLACK = timedelta(minutes=30)
@@ -51,7 +58,37 @@ def config(session: Session | None = None) -> dict:
     end_h, end_m = (int(x) for x in schedule["end"].split(":"))
     window = (end_h * 60 + end_m) - (start_h * 60 + start_m)
     return {"tasks": TASKS, "start": schedule["start"], "every_hours": int(schedule["every_hours"]),
-            "window_minutes": max(window, 0), "weekly_day": weekly["day"], "weekly_time": weekly["time"]}
+            "window_minutes": max(window, 0), "weekly_day": weekly["day"], "weekly_time": weekly["time"],
+            "days": [d for d in ALL_DAYS if d in (schedule.get("days") or ALL_DAYS)],
+            "times": sorted(set(schedule.get("times") or [])),
+            "pipeline": get_setting(session, "pipeline")}
+
+
+def _minutes(clock: str) -> int:
+    hour, minute = (int(x) for x in clock.split(":"))
+    return hour * 60 + minute
+
+
+def run_slots(cfg: dict) -> list[int]:
+    """Minutes after midnight when a pass is scheduled: the explicit times, else start + k * interval inside the window."""
+    if cfg.get("times"):
+        return sorted(_minutes(t) for t in cfg["times"])
+    step = max(int(cfg["every_hours"]), 1) * 60
+    return [_minutes(cfg["start"]) + k * step for k in range(cfg["window_minutes"] // step + 1)]
+
+
+def day_allowed(now: datetime, cfg: dict) -> bool:
+    return now.strftime("%a").lower()[:3] in (cfg.get("days") or ALL_DAYS)
+
+
+def late_run_ok(now: datetime, cfg: dict) -> bool:
+    """A scheduled run Windows started late still counts only if it is on a chosen day and close enough to a slot."""
+    if not day_allowed(now, cfg):
+        return False
+    if cfg.get("times"):
+        minutes = now.hour * 60 + now.minute
+        return any(0 <= minutes - slot <= LATE_TIMES_GRACE for slot in run_slots(cfg))
+    return within_window(now, cfg["start"], cfg["window_minutes"])
 
 
 def _pid_alive(pid: int) -> bool:
@@ -84,7 +121,14 @@ def acquire_lock(lock: Path = LOCK) -> bool:
     return True
 
 
-def default_steps() -> list[tuple[str, Callable[[], None]]]:
+def default_steps(pipeline: str | None = None) -> list[tuple[str, Callable[[], None]]]:
+    if pipeline is None:
+        with session_scope() as session:
+            pipeline = get_setting(session, "pipeline")
+    if pipeline == "redesign":
+        from jobpilot.agents import discover, documents, shortlist
+
+        return [("discover", discover.run), ("shortlist", shortlist.run), ("documents", documents.run)]
     from jobpilot.agents import docs, score, search
 
     return [("search", search.run), ("score", score.run), ("docs", docs.run)]
@@ -97,8 +141,9 @@ def run_pipeline(steps: list[tuple[str, Callable[[], None]]] | None = None, lock
         return 0
     failed = []
     try:
-        print(f"{datetime.now():%Y-%m-%d %H:%M} scheduled pass started", flush=True)
-        for name, step in steps or default_steps():
+        steps = steps or default_steps()
+        print(f"{datetime.now():%Y-%m-%d %H:%M} scheduled pass started ({', '.join(n for n, _ in steps)})", flush=True)
+        for name, step in steps:
             try:
                 step()
             except Exception as error:  # already recorded in agent_runs
@@ -141,6 +186,15 @@ def last_search_started(session: Session | None = None) -> datetime | None:
 def catch_up_due(now: datetime, cfg: dict, last_started: datetime | None) -> bool:
     """True when a missed pass should run now: inside the window and the last search is overdue.
     now is local time with tzinfo; last_started is the UTC start of the newest search run."""
+    if not day_allowed(now, cfg):
+        return False
+    if cfg.get("times"):
+        minutes = now.hour * 60 + now.minute
+        recent = [s for s in run_slots(cfg) if 0 <= minutes - s <= CATCH_UP_TIMES_MAX]
+        if not recent:
+            return False
+        latest = now.replace(hour=max(recent) // 60, minute=max(recent) % 60, second=0, microsecond=0)
+        return last_started is None or last_started < latest
     if not within_window(now, cfg["start"], cfg["window_minutes"]):
         return False
     if last_started is None:
@@ -172,9 +226,10 @@ def main(argv: list[str] | None = None) -> None:
               flush=True)
     elif args.log:  # the scheduled task: Windows may start a missed run hours late (StartWhenAvailable)
         cfg = config()
-        if not within_window(datetime.now(), cfg["start"], cfg["window_minutes"]):
-            print(f"{datetime.now():%Y-%m-%d %H:%M} outside the schedule window ({cfg['start']} + "
-                  f"{cfg['window_minutes'] // 60} h); skipped this late run", flush=True)
+        if not late_run_ok(datetime.now(), cfg):
+            print(f"{datetime.now():%Y-%m-%d %H:%M} outside the schedule (days {','.join(cfg['days'])}; "
+                  f"{', '.join(cfg['times']) or cfg['start'] + ' + ' + str(cfg['window_minutes'] // 60) + ' h'}); "
+                  "skipped this late run", flush=True)
             sys.exit(0)
     sys.exit(run_pipeline())
 

@@ -2,7 +2,9 @@
 Registers JobPilot's three Windows Task Scheduler tasks for the current user.
 Times come from the dashboard Settings (schedule + weekly review); run this again after changing them.
 
-  JobPilot Search-Score-Docs      daily from <start>, every <every_hours> h for the window  -> python -m jobpilot.scheduled
+  JobPilot Search-Score-Docs      on the chosen days: from <start> every <every_hours> h for the window,
+                                  or at each explicit time if Settings lists run times       -> python -m jobpilot.scheduled
+                                  (the `pipeline` setting picks the agents: legacy or redesign)
   JobPilot Weekly-Answer-Review   weekly on <day> at <time>                                   -> python -m jobpilot.weekly
   JobPilot Catch-up               on sign-in, unlock and wake from sleep (2 min delay)         -> python -m jobpilot.scheduled --catch-up
                                   runs a pass only when the last search is overdue (Windows doesn't
@@ -40,11 +42,26 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 
-# Pipeline: daily trigger at <start>, repeated every <every_hours> h for the window.
-$pipelineTrigger = New-ScheduledTaskTrigger -Daily -At $cfg.start
-$repeat = New-ScheduledTaskTrigger -Once -At $cfg.start -RepetitionInterval (New-TimeSpan -Hours $cfg.every_hours) `
-    -RepetitionDuration (New-TimeSpan -Minutes $cfg.window_minutes)
-$pipelineTrigger.Repetition = $repeat.Repetition
+# Pipeline: on the chosen days. Interval mode = one trigger at <start> repeated every <every_hours> h for the window;
+# times mode = one trigger per explicit time.
+$dayNames = @($cfg.days | ForEach-Object { $days[$_] })
+$everyDay = $dayNames.Count -ge 7
+function New-PipelineTrigger($at) {
+    if ($everyDay) { New-ScheduledTaskTrigger -Daily -At $at } else { New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayNames -At $at }
+}
+$runTimes = @($cfg.times)
+if ($runTimes.Count -gt 0) {
+    $pipelineTrigger = @($runTimes | ForEach-Object { New-PipelineTrigger $_ })
+    $when = "at $($runTimes -join ', ')"
+} else {
+    $pipelineTrigger = New-PipelineTrigger $cfg.start
+    $repeat = New-ScheduledTaskTrigger -Once -At $cfg.start -RepetitionInterval (New-TimeSpan -Hours $cfg.every_hours) `
+        -RepetitionDuration (New-TimeSpan -Minutes $cfg.window_minutes)
+    $pipelineTrigger.Repetition = $repeat.Repetition
+    $when = "from $($cfg.start), every $($cfg.every_hours) h for $($cfg.window_minutes / 60) h"
+}
+$dayText = if ($everyDay) { "daily" } else { ($dayNames -join "/") }
+$steps = if ($cfg.pipeline -eq "redesign") { "discover -> shortlist -> documents" } else { "search -> score -> docs" }
 $pipelineAction = New-ScheduledTaskAction -Execute $pythonw -Argument "-m jobpilot.scheduled --log" -WorkingDirectory $root
 
 $weeklyTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days[$cfg.weekly_day] -At $cfg.weekly_time
@@ -71,11 +88,11 @@ $catchupAction = New-ScheduledTaskAction -Execute $pythonw -Argument "-m jobpilo
 
 $plan = @(
     @{ Name = $cfg.tasks.pipeline; Trigger = $pipelineTrigger; Action = $pipelineAction
-       Text = "daily from $($cfg.start), every $($cfg.every_hours) h for $($cfg.window_minutes / 60) h: search -> score -> docs" },
+       Text = "$dayText $when`: $steps" },
     @{ Name = $cfg.tasks.weekly; Trigger = $weeklyTrigger; Action = $weeklyAction
        Text = "every $($days[$cfg.weekly_day]) at $($cfg.weekly_time): weekly answer-review reminder" },
     @{ Name = $cfg.tasks.catchup; Trigger = @($logonTrigger, $unlockTrigger, $wakeTrigger); Action = $catchupAction
-       Text = "on sign-in, unlock and wake: search -> score -> docs only if the last search is overdue" }
+       Text = "on sign-in, unlock and wake: $steps only if the last search is overdue" }
 )
 foreach ($task in $plan) {
     if ($WhatIf) { "Would register: $($task.Name) ($($task.Text))"; continue }

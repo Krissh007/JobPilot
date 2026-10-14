@@ -45,7 +45,8 @@ def test_lock_skips_an_overlapping_pass(tmp_path):
 
 def test_config_matches_settings(session):
     assert scheduled.config(session) == {"tasks": scheduled.TASKS, "start": "08:00", "every_hours": 4,
-                                         "window_minutes": 840, "weekly_day": "mon", "weekly_time": "09:00"}
+                                         "window_minutes": 840, "weekly_day": "mon", "weekly_time": "09:00",
+                                         "days": scheduled.ALL_DAYS, "times": [], "pipeline": "legacy"}
 
 
 def test_schedule_api_reports_tasks_and_registers(client: TestClient, monkeypatch):
@@ -140,3 +141,128 @@ def test_catch_up_exits_quietly_when_nothing_is_due(monkeypatch):
     with pytest.raises(SystemExit) as exit_info:
         scheduled.main(["--catch-up"])
     assert exit_info.value.code == 0 and ran == []
+
+
+# ---- pipeline switch, days of the week, explicit run times ----------------------------
+
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
+TIMES = {**CFG, "times": ["09:30", "18:00"]}
+
+
+def test_calendar_assumption():
+    assert ist(9, 0, day=12).strftime("%a") == "Mon" and ist(9, 0, day=10).strftime("%a") == "Sat"
+
+
+def test_default_steps_follow_the_pipeline_setting(session):
+    from jobpilot.agents import discover, docs, documents, score, search, shortlist
+
+    assert scheduled.default_steps("legacy") == [("search", search.run), ("score", score.run), ("docs", docs.run)]
+    assert scheduled.default_steps("redesign") == [("discover", discover.run), ("shortlist", shortlist.run),
+                                                   ("documents", documents.run)]
+
+
+def test_default_steps_reads_the_setting_from_the_database(db_url, monkeypatch):
+    from contextlib import contextmanager
+
+    from sqlmodel import Session
+
+    from jobpilot.agents import discover
+    from jobpilot.db.repo import put_setting
+    from jobpilot.db.session import get_engine
+
+    @contextmanager
+    def scope():
+        with Session(get_engine(db_url)) as s:
+            yield s
+
+    monkeypatch.setattr(scheduled, "session_scope", scope)
+    assert scheduled.default_steps()[0][0] == "search"          # legacy until you switch it
+    with Session(get_engine(db_url)) as s:
+        put_setting(s, "pipeline", "redesign")
+        s.commit()
+    assert scheduled.default_steps()[0] == ("discover", discover.run)
+
+
+def test_weekdays_only_blocks_the_weekend_for_late_runs_and_catch_up():
+    cfg = {**CFG, "days": WEEKDAYS}
+    assert scheduled.late_run_ok(ist(9, 0, day=12), cfg) and not scheduled.late_run_ok(ist(9, 0, day=10), cfg)
+    assert scheduled.catch_up_due(ist(14, 13, day=12), cfg, None) and not scheduled.catch_up_due(ist(14, 13, day=10), cfg, None)
+
+
+def test_default_days_means_every_day():
+    assert scheduled.late_run_ok(ist(9, 0, day=10), CFG) and scheduled.late_run_ok(ist(9, 0, day=12), CFG)
+
+
+def test_interval_slots_match_the_task_scheduler_repetition():
+    assert scheduled.run_slots(CFG) == [8 * 60, 12 * 60, 16 * 60, 20 * 60]
+    assert scheduled.run_slots(TIMES) == [9 * 60 + 30, 18 * 60]
+
+
+def test_explicit_times_late_run_only_near_a_slot():
+    assert scheduled.late_run_ok(ist(9, 30, day=12), TIMES) and scheduled.late_run_ok(ist(10, 45, day=12), TIMES)
+    assert not scheduled.late_run_ok(ist(12, 0, day=12), TIMES)     # between slots
+    assert not scheduled.late_run_ok(ist(9, 0, day=12), TIMES)      # before the first slot
+
+
+def test_explicit_times_catch_up():
+    asleep = ist(18, 0, day=11).astimezone(timezone.utc)
+    assert scheduled.catch_up_due(ist(10, 5, day=12), TIMES, asleep)              # missed 09:30
+    done = ist(9, 31, day=12).astimezone(timezone.utc)
+    assert not scheduled.catch_up_due(ist(10, 5, day=12), TIMES, done)            # that slot already ran
+    assert not scheduled.catch_up_due(ist(14, 0, day=12), TIMES, asleep)          # 09:30 is over 4 h ago
+    assert scheduled.catch_up_due(ist(18, 20, day=12), TIMES, done)               # missed 18:00
+    assert scheduled.catch_up_due(ist(9, 40, day=12), TIMES, None)
+
+
+def test_config_carries_days_times_and_pipeline(session):
+    from jobpilot.db.repo import put_setting
+
+    put_setting(session, "schedule", {"every_hours": 6, "start": "07:00", "end": "19:00", "timezone": "Asia/Kolkata",
+                                      "days": ["fri", "mon"], "times": ["18:00", "09:30", "09:30"]})
+    put_setting(session, "pipeline", "redesign")
+    cfg = scheduled.config(session)
+    assert cfg["days"] == ["mon", "fri"] and cfg["times"] == ["09:30", "18:00"] and cfg["pipeline"] == "redesign"
+
+
+def test_pipeline_log_line_names_the_steps(tmp_path, capsys):
+    scheduled.run_pipeline([("discover", lambda: None), ("shortlist", lambda: None)], lock=tmp_path / "l")
+    assert "scheduled pass started (discover, shortlist)" in capsys.readouterr().out
+
+
+# ---- settings API: the filters you can set -------------------------------------------
+
+def test_settings_api_exposes_and_validates_pipeline_schedule_and_filters(client):
+    body = client.get("/api/settings").json()
+    assert body["pipeline"] == "legacy" and body["schedule"]["days"] == scheduled.ALL_DAYS and body["schedule"]["times"] == []
+    assert body["discovery"]["max_posted_days"] == 7 and body["discovery"]["locations"] == ["Hyderabad"]
+    assert body["scoring"] == {"exp_min": 3, "exp_max": 7}
+
+    saved = client.put("/api/settings", json={
+        "pipeline": "redesign",
+        "schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": ["sat", "mon", "tue"], "times": ["18:00", "09:30"]},
+        "discovery": {"locations": ["Hyderabad", "Pune"], "max_posted_days": 3, "enrich_per_query": 5},
+        "scoring": {"exp_max": 5}}).json()
+    assert saved["pipeline"] == "redesign" and saved["schedule"]["days"] == ["mon", "tue", "sat"]
+    assert saved["schedule"]["times"] == ["09:30", "18:00"]
+    assert saved["discovery"]["locations"] == ["Hyderabad", "Pune"] and saved["discovery"]["max_posted_days"] == 3
+    assert saved["discovery"]["enrich_per_query"] == 5 and saved["discovery"]["use_variants"] is True   # untouched keys stay
+    assert saved["scoring"] == {"exp_min": 3, "exp_max": 5}
+
+    # a second partial patch keeps the first
+    again = client.put("/api/settings", json={"discovery": {"max_posted_days": 14}}).json()
+    assert again["discovery"]["locations"] == ["Hyderabad", "Pune"] and again["discovery"]["max_posted_days"] == 14
+
+
+@pytest.mark.parametrize("payload", [
+    {"pipeline": "turbo"},
+    {"schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": []}},
+    {"schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": ["funday"]}},
+    {"schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "times": ["25:00"]}},
+    {"schedule": {"every_hours": 4, "start": "8:00", "end": "22:00"}},
+    {"discovery": {"max_posted_days": 0}},
+    {"discovery": {"sources": ["monster"]}},
+    {"scoring": {"exp_min": 9}},
+])
+def test_settings_api_rejects_bad_values(client, payload):
+    assert client.put("/api/settings", json=payload).status_code == 422
+    assert client.get("/api/settings").json()["pipeline"] == "legacy"     # nothing was half-saved

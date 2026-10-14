@@ -203,4 +203,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "answers_reviewed_at": None,
     # Search LinkedIn with its Easy Apply filter (other LinkedIn jobs can't be applied to by the agent).
     "linkedin_easy_apply_only": True,
+    # Which agents the scheduled pass runs: "legacy" (search, score, docs) or "redesign" (discover, shortlist, documents).
+    "pipeline": "legacy",
+    # Partial overrides for the redesign agents (jobpilot.discovery.config.DiscoveryConfig, jobpilot.scoring.gates.GateConfig).
+    "discovery": {},
+    "scoring": {},
 }
