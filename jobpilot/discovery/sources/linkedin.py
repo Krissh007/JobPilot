@@ -36,7 +36,9 @@ def _inner(chunk: str, tag: str, css_class: str) -> str:
 def parse_cards(markup: str, today: date | None = None) -> list[Card]:
     today = today or date.today()
     cards: list[Card] = []
-    for chunk in re.split(r'(?=<div[^>]*class="[^"]*base-search-card)', markup)[1:]:
+    # Split on the card container only: its class list has the exact token "base-search-card", whereas inner
+    # elements (base-search-card__info, __title ...) must stay inside their card.
+    for chunk in re.split(r'(?=<div[^>]*class="(?:[^"]*\s)?base-search-card(?:\s[^"]*)?")', markup)[1:]:
         m = re.search(r'data-entity-urn="[^"]*?(\d{6,})"', chunk) or re.search(r"/jobs/view/[^\"?]*?-(\d{6,})", chunk)
         title = _inner(chunk, "h3", "base-search-card__title")
         if not m or not title:
