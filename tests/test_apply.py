@@ -33,7 +33,7 @@ JOB_URL = "https://www.linkedin.com/jobs/view/4300000001/"
 CHECKPOINT_URL = "https://www.linkedin.com/checkpoint/challenge/xyz"
 
 FAKE_PAGE = """<!doctype html><html><body><main>
-<h1>AI Business Analyst</h1><button id="ea">Easy Apply</button>
+<h1>AI Business Analyst</h1>__EA__
 <div id="dlg" role="dialog" style="display:none"></div>
 <div id="box" role="alertdialog" style="display:none"><p>Save this application?</p>
   <button id="discard">Discard</button><button id="save">Save</button></div></main>
@@ -94,7 +94,12 @@ def chrome():
         browser.close()
 
 
-def factory(chrome, extra: str = "", signed_in: bool = True, redirect_to_checkpoint: bool = False, save_prompt: bool = True):
+EA_BUTTON = '<button id="ea">Easy Apply</button>'
+DRAFT_BUTTON = '<button id="ea">Continue</button><p>You last modified this application 3 hours ago</p>'
+
+
+def factory(chrome, extra: str = "", signed_in: bool = True, redirect_to_checkpoint: bool = False, save_prompt: bool = True,
+            apply_button: str = EA_BUTTON):
     holder = {"save": 0, "discard": 0}
 
     @contextmanager
@@ -102,7 +107,7 @@ def factory(chrome, extra: str = "", signed_in: bool = True, redirect_to_checkpo
         context = chrome.new_context()
         if signed_in:
             context.add_cookies([{"name": "li_at", "value": "test", "domain": ".www.linkedin.com", "path": "/"}])
-        html = FAKE_PAGE.replace("__EXTRA__", extra).replace("__PROMPT__", "true" if save_prompt else "false")
+        html = FAKE_PAGE.replace("__EA__", apply_button).replace("__EXTRA__", extra).replace("__PROMPT__", "true" if save_prompt else "false")
 
         def handle(route):
             for name in ("save", "discard"):
@@ -450,3 +455,43 @@ def test_skip_works_on_a_parked_application(db_url, world, chrome):
     with Session(get_engine(db_url)) as s:
         app = s.exec(select(Application)).one()
         assert decide(app.id, ApplicationState.skipped, s)["state"] == "skipped"
+
+
+def test_explicit_rerun_replaces_a_parked_application_without_counting_as_a_skip(db_url, world, chrome):
+    from jobpilot.agents.apply import readiness
+
+    make, _ = factory(chrome, extra=WHY)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    with Session(get_engine(db_url)) as s:
+        assert runner.select_jobs(s, world, 60) == []                  # busy: not picked up on its own
+    runner.run(job_id=world, db_url=db_url, browser_factory=make, pacing=FakePacing(),
+               drafter_factory=lambda job: (lambda q, options=None: None))
+    with Session(get_engine(db_url)) as s:
+        apps = s.exec(select(Application).order_by(Application.id)).all()
+        assert [(a.state.value, a.reason) for a in apps] == [("skipped", "superseded"), ("pending_review", "draft_saved")]
+        assert readiness.compute(s).count("skipped") == 0              # not one of your decisions
+
+
+# ---- resuming a saved draft ("Continue") -----------------------------------------------
+
+def test_saved_draft_shows_continue_and_is_resumed_not_marked_external(db_url, world, chrome):
+    make, _ = factory(chrome, apply_button=DRAFT_BUTTON)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(db_url, decide=ApplicationState.skipped),
+               drafter_factory=lambda job: (lambda q, options=None: "I am keen on AI products."))
+    _, app, _, run = state(db_url, world)
+    assert "not an Easy Apply" not in run.log and "form filled, stopped before Submit" in run.log
+    assert app.reason == "skipped_by_you"          # reached the form; the (test) user then skipped it
+
+
+def test_a_lone_continue_button_is_not_treated_as_easy_apply(db_url, world, chrome):
+    make, _ = factory(chrome, apply_button='<button id="ea">Continue</button>')   # no "last modified" sentence
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: None)
+    _, app, _, run = state(db_url, world)
+    assert app.reason == "not_easy_apply" and "not an Easy Apply" in run.log
+
+
+def test_stuck_form_parks_again_after_resuming_a_draft(db_url, world, chrome):
+    make, holder = factory(chrome, extra=WHY, apply_button=DRAFT_BUTTON)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    _, app, _, _ = state(db_url, world)
+    assert app.reason == "draft_saved" and holder["save"] == 1 and holder["discard"] == 0

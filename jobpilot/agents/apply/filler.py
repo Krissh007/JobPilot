@@ -34,6 +34,12 @@ def is_consent(question: str) -> bool:
     return bool(CONSENT.search(question))
 
 
+# A saved draft turns LinkedIn's "Easy Apply" button into "Continue", with "You last modified this application ..."
+# beside it. "Continue" alone is NOT an Easy Apply button, so it only counts together with that sentence.
+CONTINUE_BUTTON = re.compile(r"^\s*continue\s*$", re.IGNORECASE)
+DRAFT_NOTICE = re.compile(r"you last modified this application", re.IGNORECASE)
+
+
 def easy_apply_module():
     return bridge.easy_apply()
 
@@ -49,6 +55,13 @@ def make_filler_class():
             self.records: list[FieldRecord] = []
             self.consent: list[str] = []  # required consent boxes/questions left for you
             self._seen: set[str] = set()
+
+        def _button(self, scope: Any, name: Any) -> Any:
+            found = super()._button(scope, name)
+            if found is None and scope is self.page and name.pattern == easy_apply_module().EASY_APPLY_BUTTON.pattern:
+                if DRAFT_NOTICE.search(self._body_text()):
+                    return super()._button(scope, CONTINUE_BUTTON)   # resume the draft saved earlier
+            return found
 
         def _note_consent(self, question: str) -> None:
             if question and question not in self.consent:

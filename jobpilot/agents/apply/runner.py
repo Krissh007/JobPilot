@@ -141,6 +141,19 @@ def applied_today(session: Session) -> int:
     return sum(1 for value in rows if ist_date(value) == today)
 
 
+def supersede_parked(session: Session, job_id: int) -> int:
+    """An explicit re-run of a job whose application was parked retires the old entry (state skipped, reason
+    'superseded'). That is not a decision of yours, so it never counts as a skip in the readiness statistics."""
+    old = session.exec(select(Application).where(Application.job_id == job_id,
+                                                 Application.state == ApplicationState.pending_review,
+                                                 Application.reason.in_(PARKED))).all()
+    for app in old:
+        app.state, app.reason, app.decided_at = ApplicationState.skipped, "superseded", utcnow()
+        session.add(app)
+    session.commit()
+    return len(old)
+
+
 def select_jobs(session: Session, job_id: int | None, threshold: float) -> list[Job]:
     busy = {a.job_id for a in session.exec(select(Application).where(
         Application.state.in_(OPEN_STATES) | Application.reason.in_(NEVER_RETRY)))}
@@ -517,6 +530,8 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
         wait_minutes = float(get_setting(session, "review_wait_minutes"))
         park_incomplete = bool(get_setting(session, "park_incomplete"))
         budget = cap - applied_today(session)
+        if job_id is not None and supersede_parked(session, job_id):
+            rec.log(f"#{job_id}: the earlier saved application is replaced by this run (it picks up where LinkedIn's saved draft left off)")
         jobs = select_jobs(session, job_id, threshold)
         rec.log(f"Auto-submit {'ON' if auto_submit else 'OFF'} · threshold {threshold:g} · today {cap - budget}/{cap} applied · "
                 f"{len(jobs)} job(s) queued" + (f" · stop after {limit} filled form(s)" if limit else "")
