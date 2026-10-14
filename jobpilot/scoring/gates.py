@@ -28,6 +28,9 @@ _INDIA = re.compile(r"\b(?:" + "|".join(re.escape(m) for m in INDIA_MARKERS) + r
 _REMOTE_ONLY = re.compile(r"^\W*(?:remote|work from home|wfh|hybrid|anywhere)\W*$", re.I)
 
 
+GATE_PREFIX = "Gate:"  # fixed note prefix on jobs rejected by a gate
+
+
 class GateConfig(BaseModel):
     exp_min: int = 3
     exp_max: int = 7

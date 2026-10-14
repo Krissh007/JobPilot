@@ -23,6 +23,7 @@ from jobpilot.discovery.config import DiscoveryConfig
 from jobpilot.discovery.prescore import prescore
 from jobpilot.discovery.sources.base import JobSource, Query, QueryBlocked
 from jobpilot.discovery.titles import expand_keywords
+from jobpilot.experience import experience_from_jd
 
 
 @dataclass
@@ -123,6 +124,8 @@ def run_discovery(
                 source.enrich(card)
                 card.enriched = bool(card.description)
                 result.enriched += card.enriched
+                if card.exp_min is None and card.exp_max is None:  # card showed no experience: take it from the JD
+                    card.exp_min, card.exp_max = experience_from_jd(card.description)
             except QueryBlocked as blocked:
                 log(f"Enrichment stopped [{label}]: {blocked}; saving the rest as cards")
                 break
@@ -143,7 +146,7 @@ def _to_job(card: Card) -> dict:
     return {
         "url": card.url, "title": card.title or "(untitled)", "company": card.company or "(unknown)",
         "source": card.source, "location": card.location,
-        "exp_min": card.exp_min, "exp_max": card.exp_max,
+        "exp_min": card.exp_min, "exp_max": card.exp_max, "posted_on": card.posted_on,
         "jd_text": card.description or card.snippet,
         "status": JobStatus.found,
     }

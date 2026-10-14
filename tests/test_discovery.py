@@ -283,3 +283,120 @@ def test_dry_run_opens_no_browser_and_saves_nothing(db_url):
     with Session(get_engine(db_url)) as s:
         assert s.exec(select(Job)).all() == []
         assert "AI business analyst" in s.exec(select(AgentRun)).one().log
+
+
+# ---- experience from JD, enrichment backlog ------------------------------------------
+
+from jobpilot.db.models import Actor, StatusHistory  # noqa: E402
+from jobpilot.db.repo import upsert_job  # noqa: E402
+from jobpilot.discovery.backlog import EXPIRED_PREFIX, run_backlog  # noqa: E402
+from jobpilot.experience import experience_from_jd  # noqa: E402
+
+
+def test_experience_from_jd():
+    assert experience_from_jd("Requires 4-6 years of experience in analytics") == (4, 6)
+    assert experience_from_jd("Minimum 5 years experience with SQL") == (5, None)
+    assert experience_from_jd("3+ years of relevant experience") == (3, None)
+    assert experience_from_jd("Founded 12 years ago. Great culture.") == (None, None)
+    assert experience_from_jd("") == (None, None)
+
+
+def test_pipeline_reads_experience_from_jd_after_enrichment_and_stores_posted_on(session):
+    class JDSource(FakeSource):
+        def enrich(self, c):
+            c.description = "Own roadmap. 8-12 years of experience required. " * 5
+            return c
+
+    src = JDSource("linkedin", {"Business Analyst": [card(age=2)]})
+    run_discovery(session, config(), {"linkedin": src}, TODAY, log=lambda m: None)
+    job = session.exec(select(Job)).one()
+    assert (job.exp_min, job.exp_max) == (8, 12) and job.posted_on == TODAY - timedelta(days=2)
+
+
+def add_found(session, n, title="Business Analyst", jd="", posted=None, found_days_ago=0, **kw):
+    job, _ = upsert_job(session, {"url": f"https://www.linkedin.com/jobs/view/40000001{n:02d}", "title": title,
+                                  "company": f"Co{n}", "source": "linkedin", "location": "Hyderabad",
+                                  "jd_text": jd, "posted_on": posted, **kw})
+    job.found_at = job.found_at - timedelta(days=found_days_ago)
+    session.add(job)
+    session.commit()
+    return job
+
+
+class BacklogSource(FakeSource):
+    def enrich(self, c):
+        if self.enrich_fail:
+            raise QueryBlocked("blocked", "captcha")
+        self.enriched.append(c.url)
+        c.description = "" if "EMPTY" in c.title else "Needs 4-6 years of experience. SQL, LLM work. " * 5
+        return c
+
+
+def test_backlog_enriches_freshest_first_within_budget(session):
+    old = add_found(session, 1, posted=TODAY - timedelta(days=5))
+    fresh = add_found(session, 2, posted=TODAY)
+    mid = add_found(session, 3, posted=TODAY - timedelta(days=2))
+    src = BacklogSource("linkedin")
+    report = run_backlog(session, config(backlog_budget=2), {"linkedin": src}, TODAY, log=lambda m: None)
+    assert src.enriched == [fresh.url, mid.url]
+    assert report.enriched == 2 and report.waiting == 1
+    session.refresh(fresh)
+    session.refresh(old)
+    assert len(fresh.jd_text) > 100 and (fresh.exp_min, fresh.exp_max) == (4, 6) and old.jd_text == ""
+
+
+def test_backlog_expires_jobs_past_freshness_window(session):
+    stale = add_found(session, 1, posted=TODAY - timedelta(days=9))
+    live = add_found(session, 2, posted=TODAY - timedelta(days=7))
+    src = BacklogSource("linkedin")
+    report = run_backlog(session, config(), {"linkedin": src}, TODAY, log=lambda m: None)
+    session.refresh(stale)
+    assert report.expired == 1 and stale.status == JobStatus.rejected and EXPIRED_PREFIX in stale.notes
+    assert src.enriched == [live.url]                       # the expired job is never opened
+    hist = session.exec(select(StatusHistory).where(StatusHistory.job_id == stale.id,
+                                                    StatusHistory.to_status == JobStatus.rejected)).one()
+    assert hist.actor == Actor.agent
+
+
+def test_backlog_falls_back_to_found_date_when_posted_unknown(session):
+    old = add_found(session, 1, posted=None, found_days_ago=10)
+    new = add_found(session, 2, posted=None, found_days_ago=1)
+    run_backlog(session, config(), {"linkedin": BacklogSource("linkedin")}, date.today(), log=lambda m: None)
+    assert session.get(Job, old.id).status == JobStatus.rejected and session.get(Job, new.id).status == JobStatus.found
+    assert len(session.get(Job, new.id).jd_text) > 100
+
+
+def test_backlog_skips_enriched_scored_and_decided_jobs(session):
+    add_found(session, 1, jd="x" * 400, posted=TODAY)
+    scored = add_found(session, 2, posted=TODAY)
+    scored.score = 50
+    session.add(scored)
+    applied = add_found(session, 3, posted=TODAY, status=JobStatus.applied)
+    session.commit()
+    src = BacklogSource("linkedin")
+    report = run_backlog(session, config(), {"linkedin": src}, TODAY, log=lambda m: None)
+    assert src.enriched == [] and report.enriched == 0 and applied.status == JobStatus.applied
+
+
+def test_backlog_empty_description_not_retried_and_block_stops_that_source(session):
+    empty = add_found(session, 1, title="EMPTY role", posted=TODAY)
+    src = BacklogSource("linkedin")
+    run_backlog(session, config(), {"linkedin": src}, TODAY, log=lambda m: None)
+    run_backlog(session, config(), {"linkedin": src}, TODAY, log=lambda m: None)
+    assert src.enriched == [empty.url] and "Enrich:" in session.get(Job, empty.id).notes
+
+    a = add_found(session, 2, posted=TODAY)
+    add_found(session, 3, posted=TODAY)
+    report = run_backlog(session, config(), {"linkedin": BacklogSource("linkedin", enrich_fail=True)}, TODAY,
+                         log=lambda m: None)
+    assert report.enriched == 0 and report.waiting == 2 and session.get(Job, a.id).status == JobStatus.found
+
+
+def test_backlog_runs_after_discovery_in_agent(db_url):
+    with Session(get_engine(db_url)) as s:
+        add_found(s, 5, posted=date.today())
+    discover.run({"keywords": ["Business Analyst"], "use_variants": False, "sources": ["linkedin"]}, db_url=db_url,
+                 sources={"linkedin": BacklogSource("linkedin", {})})
+    with Session(get_engine(db_url)) as s:
+        assert len(s.exec(select(Job)).one().jd_text) > 100
+        assert "Backlog: expired 0, enriched 1" in s.exec(select(AgentRun)).one().log

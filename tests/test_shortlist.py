@@ -9,7 +9,7 @@ from jobpilot.db.repo import put_setting, upsert_job
 from jobpilot.db.session import get_engine
 from jobpilot.llm.gemini import QuotaExhausted
 from jobpilot.resume import Resume
-from jobpilot.scoring.gates import GateConfig, check_gates, experience_gate, india_gate
+from jobpilot.scoring.gates import GATE_PREFIX, GateConfig, check_gates, experience_gate, india_gate
 
 AI = {"score": 78, "skills": 80, "experience": 75, "domain": 80, "ai_role": True, "reason": "Owns LLM feature requirements.",
       "matched_skills": ["SQL"], "missing_skills": []}
@@ -177,3 +177,30 @@ def test_scoring_gate_range_read_from_settings(db_url):
         s.commit()
     shortlist.run(db_url=db_url, client=FakeClient(AI))
     assert get(db_url, job_id).status == JobStatus.shortlisted
+
+
+def test_job_with_no_experience_on_card_passes_gate_and_goes_to_gemini(db_url):
+    job_id = add_job(db_url, exp_min=None, exp_max=None, jd_text=JD)   # JD states no years either
+    client = FakeClient(AI)
+    shortlist.run(db_url=db_url, client=client)
+    assert len(client.prompts) == 1 and get(db_url, job_id).status == JobStatus.shortlisted
+
+
+def test_experience_rechecked_from_jd_after_enrichment(db_url):
+    senior = add_job(db_url, exp_min=None, exp_max=None, jd_text=JD + " Requires 10-15 years of experience.")
+    junior = add_job(db_url, exp_min=None, exp_max=None, jd_text=JD + " Requires 0-1 years of experience.")
+    fine = add_job(db_url, exp_min=None, exp_max=None, jd_text=JD + " Requires 4-6 years of experience.")
+    client = FakeClient(AI)
+    shortlist.run(db_url=db_url, client=client)
+    assert len(client.prompts) == 1
+    for ident in (senior, junior):
+        job = get(db_url, ident)
+        assert job.status == JobStatus.rejected and job.notes.startswith(GATE_PREFIX)
+    ok = get(db_url, fine)
+    assert (ok.exp_min, ok.exp_max) == (4, 6) and ok.status == JobStatus.shortlisted
+
+
+def test_gate_note_has_fixed_prefix(db_url):
+    job_id = add_job(db_url, location="Paris", notes="my own note")
+    shortlist.run(db_url=db_url, client=FakeClient())
+    assert get(db_url, job_id).notes == "my own note\nGate: not India (Paris)"

@@ -119,5 +119,6 @@ class LinkedInSource:
         return cards[:max_cards]
 
     def enrich(self, card: Card) -> Card:
-        card.description = parse_description(self._get(POSTING_URL.format(job_id=card.extra["job_id"])))
+        job_id = card.extra.get("job_id") or re.search(r"(\d{6,})/?(?:\?|$)", card.url).group(1)
+        card.description = parse_description(self._get(POSTING_URL.format(job_id=job_id)))
         return card

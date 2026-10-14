@@ -32,7 +32,8 @@ from jobpilot.db.session import get_engine
 from jobpilot.llm.cache import cache_get, cache_key, cache_put
 from jobpilot.llm.gemini import GeminiClient, LLMConfigError, LLMError, QuotaExhausted
 from jobpilot.resume import Resume, load_resume
-from jobpilot.scoring.gates import GateConfig, check_gates
+from jobpilot.experience import experience_from_jd
+from jobpilot.scoring.gates import GATE_PREFIX, GateConfig, check_gates
 
 PROMPT_VERSION = "shortlist:v1"
 NON_AI_CAP = 59  # strictly below the shortlist threshold (60)
@@ -105,6 +106,9 @@ def apply_gates(session: Session, rec: RunRecorder, gates: GateConfig, dry_run: 
     jobs = session.exec(select(Job).where(Job.status == JobStatus.found, Job.score.is_(None), Job.is_example.is_(False))).all()
     rejected: dict[str, int] = {}
     for job in jobs:
+        if job.exp_min is None and job.exp_max is None and job.jd_text:  # re-check once a description exists
+            job.exp_min, job.exp_max = experience_from_jd(job.jd_text)
+            session.add(job)
         result = check_gates(job.location, job.exp_min, job.exp_max, gates)
         if result.passed:
             continue
@@ -112,7 +116,7 @@ def apply_gates(session: Session, rec: RunRecorder, gates: GateConfig, dry_run: 
         rejected[kind] = rejected.get(kind, 0) + 1
         rec.log(f"  gate{' (dry run)' if dry_run else ''}: #{job.id} {job.title} | {job.company}: {result.reason}")
         if not dry_run:
-            job.notes = f"{job.notes}\nGate: {result.reason}".strip()
+            job.notes = f"{job.notes}\n{GATE_PREFIX} {result.reason}".strip()
             set_status(session, job, JobStatus.rejected, actor=Actor.agent)
     if not dry_run:
         session.commit()

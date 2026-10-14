@@ -6,7 +6,7 @@ these classes must stay in step with it. Times are timezone-aware UTC.
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 import sqlalchemy as sa
@@ -97,6 +97,7 @@ class Job(SQLModel, table=True):
     resume_path: str = ""
     cover_letter_path: str = ""
     found_at: datetime = Field(default_factory=utcnow, index=True)
+    posted_on: Optional[date] = None  # portal's posting date when known (Discovery)
     applied_at: Optional[datetime] = None
     notes: str = ""
     is_example: bool = False

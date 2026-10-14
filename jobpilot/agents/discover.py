@@ -5,7 +5,9 @@ Agent 1: Discovery (the redesign). Runs alongside the old `search` agent, which 
     python -m jobpilot.agents.discover --sources linkedin --keywords "Business Analyst" --enrich-per-query 5
     python -m jobpilot.agents.discover --dry-run                    # print the planned queries, open no browser
 
-Reads nothing, writes jobs at status `found` (Scoring picks them up from there).
+Writes jobs at status `found` (Scoring picks them up from there). After the queries it works the enrichment
+backlog: unenriched `found` jobs get their description freshest-first within `backlog_budget`; those past
+the freshness window are expired (found -> rejected, note "Expired: ...").
 agent_runs.found = new jobs saved, processed = cards fetched. Logged under the `search` agent name.
 """
 
@@ -19,6 +21,7 @@ from sqlmodel import Session
 from jobpilot.agents._run import agent_run
 from jobpilot.db.models import AgentName
 from jobpilot.db.session import get_engine
+from jobpilot.discovery.backlog import run_backlog
 from jobpilot.discovery.config import DiscoveryConfig
 from jobpilot.discovery.pipeline import build_queries, run_discovery
 from jobpilot.discovery.sources.linkedin import LinkedInSource
@@ -39,11 +42,18 @@ def run(overrides: dict | None = None, dry_run: bool = False, db_url: str | None
                     rec.log(f"  {q.source} | {q.keyword} | {q.location}")
                 return
             if sources is not None:
-                report = run_discovery(session, config, sources, log=rec.log)
+                report = _discover_and_backlog(session, config, sources, rec.log)
             else:
                 report = _run_with_browser(session, config, rec.log)
         rec.found, rec.processed = report.total("saved"), report.total("fetched")
         rec.log(report.summary())
+
+
+def _discover_and_backlog(session, config: DiscoveryConfig, sources: dict, log):
+    """New cards first, then the leftover unenriched `found` jobs (freshest first; stale ones expire)."""
+    report = run_discovery(session, config, sources, log=log)
+    run_backlog(session, config, sources, log=log)
+    return report
 
 
 def _run_with_browser(session, config: DiscoveryConfig, log):
@@ -61,7 +71,7 @@ def _run_with_browser(session, config: DiscoveryConfig, log):
                                        sleep_ms=lambda ms: page.wait_for_timeout(ms)),
         }
         try:
-            return run_discovery(session, config, {k: v for k, v in sources.items() if k in config.sources}, log=log)
+            return _discover_and_backlog(session, config, {k: v for k, v in sources.items() if k in config.sources}, log)
         finally:
             naukri.close()
             context.close()
