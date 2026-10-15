@@ -341,3 +341,20 @@ def test_last_due_is_monday_0900_ist():
     assert last_due(datetime(2026, 10, 7, 5, 30, tzinfo=timezone.utc), "mon", "09:00").isoformat() == "2026-10-05T09:00:00+05:30"
     # Mon 5 Oct 08:00 IST, before 09:00 -> the previous Monday
     assert last_due(datetime(2026, 10, 5, 2, 30, tzinfo=timezone.utc), "mon", "09:00").isoformat() == "2026-09-28T09:00:00+05:30"
+
+
+def test_job_list_carries_the_ai_tier(client, db_url):
+    from sqlmodel import Session
+
+    from jobpilot.db.models import Job
+    from jobpilot.db.repo import upsert_job
+    from jobpilot.db.session import get_engine
+
+    with Session(get_engine(db_url)) as s:
+        job, _ = upsert_job(s, {"title": "AI BA", "company": "TierCo", "url": "https://www.linkedin.com/jobs/view/4999999991",
+                                "score_reason": "Great fit. [Tier: AI-adjacent]"})
+        plain, _ = upsert_job(s, {"title": "Old", "company": "NoTier", "url": "https://www.linkedin.com/jobs/view/4999999992",
+                                  "score_reason": "Scored by the old agent."})
+        s.commit()
+    items = {i["company"]: i for i in client.get("/api/jobs", params={"include_examples": "true", "limit": 500}).json()["items"]}
+    assert items["TierCo"]["ai_tier"] == "AI-adjacent" and items["NoTier"]["ai_tier"] == ""

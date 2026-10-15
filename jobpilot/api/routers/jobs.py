@@ -25,6 +25,15 @@ LIST_FIELDS = ("id", "title", "company", "source", "location", "exp_min", "exp_m
                "score_experience", "score_domain", "legacy_score", "status", "found_at", "applied_at", "is_example", "skills")
 
 
+TIER_TAG = "[Tier: "  # written at the end of score_reason by jobpilot.agents.shortlist
+
+
+def ai_tier(score_reason: str) -> str:
+    reason = score_reason or ""
+    start = reason.rfind(TIER_TAG)
+    return reason[start + len(TIER_TAG): reason.find("]", start)] if start >= 0 else ""
+
+
 def fts_query(q: str) -> str:
     """User text -> safe FTS5 query: every word must match, as a prefix ("eval" finds "evaluation")."""
     return " AND ".join(f'"{token}"*' for token in re.findall(r"\w+", q))
@@ -33,6 +42,7 @@ def fts_query(q: str) -> str:
 def summary(job: Job) -> dict[str, Any]:
     data = {name: getattr(job, name) for name in LIST_FIELDS}
     data["has_docs"] = bool(job.resume_path or job.cover_letter_path)
+    data["ai_tier"] = ai_tier(job.score_reason)   # "AI-core" / "AI-adjacent" / "non-AI", "" if not scored by the redesign agent
     return data
 
 
