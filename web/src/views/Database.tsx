@@ -18,20 +18,15 @@ const SCHEMA: [string, string[]][] = [
 export function Database() {
   const { data: counts } = useTableCounts();
   const { data: meta } = useMeta();
-  const { toast, setTab } = useUI();
+  const { toast } = useUI();
   const qc = useQueryClient();
   const [confirmPurge, setConfirmPurge] = useState(false);
   const purge = useMutation({ mutationFn: api.purgeExamples, onSuccess: (r) => { toast(`Removed ${r.jobs} example jobs and their rows`); setConfirmPurge(false); qc.invalidateQueries(); } });
   const seed = useMutation({ mutationFn: api.seedExamples, onSuccess: (r) => { toast(r.added_jobs ? `Added ${r.added_jobs} example jobs` : "Examples are already there"); qc.invalidateQueries(); } });
-  const importLegacy = useMutation({
-    mutationFn: () => api.startRun("search", { import_legacy_db: true }),
-    onSuccess: (run) => { toast(`Import run #${run.id} started`); setTab("runs"); },
-    onError: (e: Error) => toast(e.message),
-  });
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="m-0 text-[12.5px] text-muted">One database: <code className="rounded bg-sunk px-1.5 font-mono text-[12px]">E:\JobPilot\data\jobpilot.db</code> (SQLite, WAL, Alembic-managed). The legacy agent's old <code className="rounded bg-sunk px-1.5 font-mono text-[12px]">jobs.db</code> is kept as a read-only archive.</p>
+      <p className="m-0 text-[12.5px] text-muted">One database: <code className="rounded bg-sunk px-1.5 font-mono text-[12px]">E:\JobPilot\data\jobpilot.db</code> (SQLite, WAL, Alembic-managed).</p>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {SCHEMA.map(([table, cols]) => (
           <Panel key={table} title={<span className="font-mono">{table}</span>} actions={<span className="num text-[12px] text-muted">{counts?.[table] ?? "…"} rows</span>}>
@@ -39,17 +34,11 @@ export function Database() {
           </Panel>
         ))}
       </div>
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-2">
         <Panel title="Export">
           <div className="flex flex-col gap-2 p-3.5 text-[12.5px] text-muted">
             <p className="m-0">Download the pipeline for Excel or a backup.</p>
             <div className="flex gap-1.5"><a href="/api/export/jobs.csv"><Button>Jobs as CSV</Button></a><a href="/api/export/all.json"><Button>Everything as JSON</Button></a></div>
-          </div>
-        </Panel>
-        <Panel title="Legacy archive">
-          <div className="flex flex-col gap-2 p-3.5 text-[12.5px] text-muted">
-            <p className="m-0">Copy jobs from the old legacy <code className="font-mono">jobs.db</code> (read-only). Already-imported jobs are only refreshed, never duplicated.</p>
-            <div><Button onClick={() => importLegacy.mutate()} disabled={importLegacy.isPending}>Import from archive</Button></div>
           </div>
         </Panel>
         <Panel title="Example rows">

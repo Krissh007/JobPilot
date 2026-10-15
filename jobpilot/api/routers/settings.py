@@ -82,7 +82,6 @@ class SettingsPatch(BaseModel):
     daily_apply_cap: Optional[int] = Field(None, ge=1, le=40)
     search_queries: Optional[list[str]] = None
     schedule: Optional[Schedule] = None
-    pipeline: Optional[Literal["legacy", "redesign"]] = None
     park_incomplete: Optional[bool] = None
     discovery: Optional[DiscoveryPatch] = None
     scoring: Optional[ScoringPatch] = None

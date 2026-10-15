@@ -6,7 +6,7 @@ apply agent never fills a form from them, and the weekly review lists them first
 Contact details (name, email, phone) are not answers; the apply agent reads them
 from the profile directly.
 
-    python -m jobpilot.legacy.answers_import
+    python -m jobpilot.agents.apply.answers_import
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from sqlmodel import Session, select
 
 from jobpilot.db.models import Answer
 from jobpilot.db.session import session_scope
-from jobpilot.legacy import bridge
+from jobpilot.config import application_profile_path
 
 # application_profile.yaml "application" keys -> the question wording forms use
 APPLICATION_QUESTIONS = {
@@ -62,7 +62,7 @@ def import_answers(session: Session, profile: dict[str, Any]) -> dict[str, int]:
 
 
 def main() -> None:
-    path = bridge.application_profile_path()
+    path = application_profile_path()
     profile = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     with session_scope() as session:
         counts = import_answers(session, profile)

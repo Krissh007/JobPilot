@@ -1,12 +1,15 @@
 # JobPilot: design
 
+> **Status (16 Oct 2026):** this document is the original design. The legacy project's code was copied into JobPilot and the old search/score/docs agents and `jobpilot/legacy/` were removed. The four agents are Discovery, Scoring, Documents and Apply; sections below that mention `legacy_shim`, `bridge` or a separate legacy project describe the original design only.
+
+
 How JobPilot is put together, why, and where its limits are. For setup and daily use see the
 [README](../README.md); for the build history see [PROGRESS.md](../PROGRESS.md).
 
 ## 1. What it is
 
 JobPilot is a local, single-user system that sits **on top of** an existing Python job agent
-(`E:\job_search_agent`, "the legacy agent") and turns it into a supervised pipeline:
+(the original search project, the legacy agent) and turns it into a supervised pipeline:
 
 ```
 search (LinkedIn, Naukri) -> score (Gemini) -> tailored resume + cover letter -> apply -> track
@@ -39,7 +42,7 @@ flowchart LR
       A["apply"]
     end
     TS["Windows Task Scheduler<br/>pipeline · weekly · catch-up"]
-    subgraph Legacy["E:\job_search_agent (unchanged)"]
+    subgraph Legacy["legacy search project (retired)"]
       LD["discovery + matching"]
       LT["tailoring + .docx writer"]
       LF["LinkedIn / Naukri fillers"]
@@ -150,7 +153,7 @@ stateDiagram-v2
 ### Scoring
 `score:v3` prompt; Pydantic-validated JSON (overall + skills/experience/domain + reason); one retry on bad
 JSON. Domain is judged only from the role's own responsibilities, and roles with no AI component are capped
-at 70, because the target is AI Business Analyst / AI Product roles. Cached by prompt version + JD + resume
+at 65, because the target is AI Business Analyst / AI Product roles. Cached by prompt version + JD + resume
 version, so editing the resume re-scores.
 
 ### Documents

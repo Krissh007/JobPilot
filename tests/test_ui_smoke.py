@@ -109,7 +109,7 @@ def test_every_screen_loads_and_a_job_can_be_moved(page, db_url):
     pg.get_by_role("button", name="Skip").first.wait_for()
 
     tab(pg, "Runs")
-    pg.get_by_text("Search", exact=True).first.wait_for()
+    pg.get_by_text("Discovery", exact=True).first.wait_for()
 
     tab(pg, "Answers")
     assert pg.locator("table tbody tr").count() >= 1

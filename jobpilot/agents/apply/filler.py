@@ -12,7 +12,6 @@ from typing import Any, Callable
 
 from jobpilot.agents.apply.answers import AnswerBank, Resolved
 from jobpilot.db.models import FieldSource
-from jobpilot.legacy import bridge
 
 
 @dataclass
@@ -42,6 +41,8 @@ DRAFT_NOTICE = re.compile(r"you last modified this application", re.IGNORECASE)
 
 # Finds required controls still empty on the current step and names each one. LinkedIn does not always raise an error
 # element with a label inside it, which left the old lookup with nothing to report ("a required field LinkedIn didn't name").
+# Real forms (16 Oct 2026, Aptita #592) also mark a Yes/No radio group as required only by a "*" at the end of the question
+# text in the wrapper around <fieldset role=radiogroup>: the inputs carry no required / aria-required at all.
 UNANSWERED_REQUIRED_JS = r"""dialog => {
   const first = t => String(t || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || '';
   const visible = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
@@ -67,6 +68,13 @@ UNANSWERED_REQUIRED_JS = r"""dialog => {
     }
     return 'an unlabelled ' + (el.tagName === 'TEXTAREA' ? 'text box' : (el.type || 'field') + ' field');
   };
+  const groupMarkedRequired = el => {
+    if (el.type !== 'radio') return false;
+    const set = el.closest('fieldset');
+    const wrap = set && set.parentElement ? set.parentElement : null;
+    const text = wrap ? String(wrap.innerText || '') : '';
+    return /\*\s*$/.test(first(text)) || /\*\s*$/.test(first(set ? set.innerText : '')) || /this field is required/i.test(text);
+  };
   const empty = el => {
     if (el.type === 'checkbox') return !el.checked;
     if (el.type === 'radio') return ![...dialog.querySelectorAll('input[type=radio]')].filter(r => r.name === el.name).some(r => r.checked);
@@ -76,7 +84,7 @@ UNANSWERED_REQUIRED_JS = r"""dialog => {
   const out = [];
   for (const el of dialog.querySelectorAll('input, select, textarea')) {
     if (['hidden', 'file', 'submit', 'button'].includes(el.type) || !visible(el)) continue;
-    const flagged = el.required || el.getAttribute('aria-required') === 'true' || el.getAttribute('aria-invalid') === 'true';
+    const flagged = el.required || el.getAttribute('aria-required') === 'true' || el.getAttribute('aria-invalid') === 'true' || groupMarkedRequired(el);
     if (flagged && empty(el)) { const n = nameOf(el); if (n && !out.includes(n)) out.push(n); }
   }
   return out;
@@ -84,7 +92,9 @@ UNANSWERED_REQUIRED_JS = r"""dialog => {
 
 
 def easy_apply_module():
-    return bridge.easy_apply()
+    from jobpilot.agents.apply import easy_apply
+
+    return easy_apply
 
 
 def make_filler_class():

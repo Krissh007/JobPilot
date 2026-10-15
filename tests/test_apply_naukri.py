@@ -209,7 +209,7 @@ def test_signed_out_portal_is_skipped_with_the_login_hint(db_url, naukri_job, ch
     with pytest.raises(RuntimeError):
         run(db_url, make, FakePacing())
     _, app, _, rec = state(db_url, naukri_job)
-    assert app is None and "python -m src.apply.naukri login" in rec.log
+    assert app is None and "python -m jobpilot.agents.apply.login naukri" in rec.log
 
 
 def test_closing_message_is_not_a_question_and_follow_is_unticked(db_url, naukri_job, chrome):

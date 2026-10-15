@@ -28,7 +28,10 @@ from jobpilot.db.session import get_engine
 
 router = APIRouter(tags=["runs"])
 
-RUNNABLE = {AgentName.search, AgentName.score, AgentName.docs, AgentName.apply}
+# The four agents and the module each one runs. The retired search/score/docs names are history only.
+MODULES = {AgentName.discovery: "discover", AgentName.scoring: "shortlist", AgentName.documents: "documents",
+           AgentName.apply: "apply"}
+RUNNABLE = set(MODULES)
 COMING: dict[AgentName, str] = {}
 STALE_AFTER = timedelta(hours=2)  # a "running" row this old with no live process is treated as dead
 LOG_DIR = ROOT / "data" / "logs"
@@ -36,21 +39,17 @@ LOG_DIR = ROOT / "data" / "logs"
 
 class RunOptions(BaseModel):
     """Whitelisted options only; nothing from the request reaches a shell."""
-    import_legacy_db: bool = False  # search: copy from the old legacy jobs.db instead of searching
-    then_score: bool = False       # search
-    limit: Optional[int] = Field(None, ge=1, le=500)  # score, docs
-    job_id: Optional[int] = Field(None, ge=1)          # score, docs, apply
+    limit: Optional[int] = Field(None, ge=1, le=500)  # scoring, documents, apply
+    job_id: Optional[int] = Field(None, ge=1)          # scoring, documents, apply
     review_only: bool = False                          # apply: never auto-submit this run
 
 
 def build_command(agent: AgentName, run_id: int, options: RunOptions) -> list[str]:
-    command = [sys.executable, "-m", f"jobpilot.agents.{agent.value}", "--run-id", str(run_id)]
-    if agent == AgentName.search:
-        command += ["--import-legacy-db"] * options.import_legacy_db + ["--then-score"] * options.then_score
-    elif agent == AgentName.apply:
+    command = [sys.executable, "-m", f"jobpilot.agents.{MODULES[agent]}", "--run-id", str(run_id)]
+    if agent == AgentName.apply:
         command += (["--job-id", str(options.job_id)] if options.job_id else []) + ["--review-only"] * options.review_only
         command += ["--limit", str(options.limit)] if options.limit else []
-    elif agent in (AgentName.score, AgentName.docs):
+    elif agent in (AgentName.scoring, AgentName.documents):
         if options.limit:
             command += ["--limit", str(options.limit)]
         if options.job_id:
@@ -98,9 +97,31 @@ def get_run(run_id: int, request: Request, session: Session = Depends(get_sessio
     return serialize(get_or_404(session, AgentRun, run_id), with_log=True)
 
 
+@router.post("/runs/pipeline", status_code=202)
+def run_now(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """ Run now: Discovery, Scoring, Documents, then Apply (review only: nothing is submitted), one after another.
+    Each agent records its own agent_runs row, so the Runs screen shows them as they start."""
+    reap(request, session)
+    busy = session.exec(select(AgentRun).where(AgentRun.agent.in_(list(RUNNABLE)), AgentRun.status == RunStatus.running,
+                                               AgentRun.is_example.is_(False))).all()
+    live = [r for r in busy if r.id in request.app.state.processes or utcnow() - _aware(r.started_at) < STALE_AFTER]
+    if live:
+        raise HTTPException(409, {"message": f"A {live[0].agent.value} run is already in progress", "run_id": live[0].id})
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+    if request.app.state.db_url:
+        env["DATABASE_URL"] = request.app.state.db_url
+    with open(LOG_DIR / "run_now.log", "w", encoding="utf-8") as console:
+        subprocess.Popen([sys.executable, "-m", "jobpilot.scheduled", "--now"], cwd=ROOT, env=env, stdout=console,
+                         stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"started": [a.value for a in MODULES], "log": "data/logs/run_now.log"}
+
+
 @router.post("/runs/{agent}", status_code=202)
 def start_run(agent: AgentName, request: Request, options: RunOptions = RunOptions(),
               session: Session = Depends(get_session)) -> dict[str, Any]:
+    if agent not in RUNNABLE:
+        raise HTTPException(400, f"The {agent.value} agent is retired; use Discovery, Scoring, Documents or Apply")
     if agent in COMING:
         raise HTTPException(501, f"The {agent.value} agent arrives in {COMING[agent]}")
     reap(request, session)

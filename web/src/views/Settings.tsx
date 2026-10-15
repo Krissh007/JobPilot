@@ -70,7 +70,6 @@ export function Settings() {
             <dt className="text-muted">API key</dt><dd className={cx("m-0", system?.gemini_key_set ? "text-good" : "text-bad")}>{system ? (system.gemini_key_set ? "set in .env (hidden)" : "missing: add GEMINI_API_KEY to .env") : "…"}</dd>
             <dt className="text-muted">Model</dt><dd className="m-0 font-mono">{system?.gemini_model || "—"}{system?.gemini_fallback_models ? ` → ${system.gemini_fallback_models}` : ""} <span className="text-muted">· {system?.gemini_rpm}/min</span></dd>
             <dt className="text-muted">Resume</dt><dd className="m-0 break-all font-mono text-[12px]">{system?.resume_path}</dd>
-            <dt className="text-muted">Legacy agent</dt><dd className="m-0 break-all font-mono text-[12px]">{system?.legacy_agent_dir}</dd>
           </dl>
         </Panel>
         <div role="note" className="rounded-lg border border-warn/40 bg-warn-soft p-3.5 text-[12.5px]">

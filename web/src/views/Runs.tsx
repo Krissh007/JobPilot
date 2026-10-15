@@ -6,9 +6,9 @@ import { useUI } from "../state";
 import { Button, Empty, ExampleTag, Panel, cx, duration, when } from "../ui";
 
 const AGENTS: { name: AgentName; title: string; desc: string; phase?: string }[] = [
-  { name: "search", title: "Search", desc: "Legacy discovery + matching on Naukri and LinkedIn, saved into jobpilot.db." },
-  { name: "score", title: "Score", desc: "Gemini scores unscored JDs against your resume and shortlists ≥ threshold." },
-  { name: "docs", title: "Docs", desc: "Tailored ATS resume + cover letter (.docx) for shortlisted jobs, fact-checked against your resume." },
+  { name: "discovery", title: "Discovery", desc: "Searches Naukri and LinkedIn, ranks cards by title, and saves new jobs as found." },
+  { name: "scoring", title: "Scoring", desc: "Hard gates, then Gemini scores each job against your resume and shortlists ≥ threshold." },
+  { name: "documents", title: "Documents", desc: "Tailored ATS resume + cover letter (.docx) for shortlisted jobs, fact-checked against your resume." },
   { name: "apply", title: "Apply", desc: "LinkedIn Easy Apply and Naukri for Docs-ready jobs: fills or checks, screenshots, then auto-submits only if Settings allow and every answer is yours; otherwise waits in Review." },
 ];
 
@@ -45,8 +45,7 @@ export function Runs() {
   const { toast } = useUI();
   const qc = useQueryClient();
   const [live, setLive] = useState<number | null>(null);
-  const [thenScore, setThenScore] = useState(true);
-  const [limit, setLimit] = useState(20);
+  const [limit, setLimit] = useState(60);
   const [docsLimit, setDocsLimit] = useState(5);
   const [reviewOnly, setReviewOnly] = useState(true);
   const [open, setOpen] = useState<number | null>(null);
@@ -76,16 +75,15 @@ export function Runs() {
             <section key={a.name} className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3.5">
               <header className="flex items-center gap-2"><h3 className="mr-auto font-display text-[15px] font-semibold">{a.title}</h3>{prev ? <StatusChip status={prev.status} /> : <span className="text-[11.5px] text-muted">no runs</span>}</header>
               <p className="m-0 text-[12.5px] text-muted">{a.desc}</p>
-              <div className="num text-[11.5px] text-muted">{prev ? <>last {when(prev.started_at)} · {prev.processed} processed · {prev.found} {a.name === "score" ? "shortlisted" : a.name === "docs" ? "with docs" : a.name === "apply" ? "submitted" : "new"}</> : "never run"}</div>
-              {a.name === "search" && <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={thenScore} onChange={(e) => setThenScore(e.target.checked)} className="accent-[var(--accent)]" />then score new jobs</label>}
-              {a.name === "docs" && <label className="flex items-center gap-1.5 text-[12px]">up to <input type="number" min={1} max={50} value={docsLimit} onChange={(e) => setDocsLimit(Number(e.target.value))} className="num w-16 rounded-md border border-line-2 bg-bg px-2 py-0.5 text-fg focus:border-accent focus:outline-none" /> jobs</label>}
+              <div className="num text-[11.5px] text-muted">{prev ? <>last {when(prev.started_at)} · {prev.processed} processed · {prev.found} {a.name === "scoring" ? "shortlisted" : a.name === "documents" ? "with docs" : a.name === "apply" ? "submitted" : "new"}</> : "never run"}</div>
+              {a.name === "documents" && <label className="flex items-center gap-1.5 text-[12px]">up to <input type="number" min={1} max={50} value={docsLimit} onChange={(e) => setDocsLimit(Number(e.target.value))} className="num w-16 rounded-md border border-line-2 bg-bg px-2 py-0.5 text-fg focus:border-accent focus:outline-none" /> jobs</label>}
               {a.name === "apply" && <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} className="accent-[var(--accent)]" />review only (never auto-submit this run)</label>}
-              {a.name === "score" && <label className="flex items-center gap-1.5 text-[12px]">up to <input type="number" min={1} max={500} value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="num w-16 rounded-md border border-line-2 bg-bg px-2 py-0.5 text-fg focus:border-accent focus:outline-none" /> jobs</label>}
+              {a.name === "scoring" && <label className="flex items-center gap-1.5 text-[12px]">up to <input type="number" min={1} max={500} value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="num w-16 rounded-md border border-line-2 bg-bg px-2 py-0.5 text-fg focus:border-accent focus:outline-none" /> jobs</label>}
               <div className="mt-auto pt-1">
                 {a.phase
                   ? <Button disabled title={`Arrives in ${a.phase}`}>Run now · {a.phase}</Button>
                   : <Button variant="primary" disabled={start.isPending || running(a.name)}
-                      onClick={() => start.mutate({ agent: a.name, options: a.name === "search" ? { then_score: thenScore } : a.name === "apply" ? { review_only: reviewOnly } : { limit: a.name === "docs" ? docsLimit : limit } })}>
+                      onClick={() => start.mutate({ agent: a.name, options: a.name === "discovery" ? {} : a.name === "apply" ? { review_only: reviewOnly } : { limit: a.name === "documents" ? docsLimit : limit } })}>
                       {running(a.name) ? "Running…" : "Run now"}
                     </Button>}
               </div>

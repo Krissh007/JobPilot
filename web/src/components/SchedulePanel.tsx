@@ -43,15 +43,9 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
   const explicit = parseTimes(timesText);
   const times = explicit.length ? explicit : runTimes(form.start, form.end, form.every_hours);
   const toggleDay = (d: string) => setForm({ ...form, days: form.days.includes(d) ? form.days.filter((x) => x !== d) : [...form.days, d] });
-  const redesign = settings.pipeline === "redesign";
-  const pipe = useMutation({
-    mutationFn: (value: Settings["pipeline"]) => api.saveSettings({ pipeline: value }),
-    onSuccess: (_r, value) => { qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["schedule"] }); toast(`Scheduled runs now use the ${value} agents`); },
-    onError: (e: Error) => toast(`Not saved: ${e.message}`),
-  });
   const label = (name: string) =>
     name === status?.config.tasks.pipeline
-      ? (redesign ? "Discover → shortlist → documents" : "Search → score → docs")
+      ? "Discovery → scoring → documents"
       : name === status?.config.tasks.catchup
         ? "Catch-up after sleep (sign-in, unlock, wake)"
         : "Weekly answer review";
@@ -59,14 +53,6 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
   return (
     <Panel title="Schedule" actions={<span className="text-[12px] text-muted">{isFetching ? "checking…" : status ? `checked ${when(status.checked_at)}` : ""}</span>}>
       <div className="flex flex-col gap-3 p-3.5 text-[12.5px]">
-        <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="sch-pipe" className="text-[11px] font-semibold uppercase tracking-[.07em] text-muted">Agents</label>
-          <select id="sch-pipe" value={settings.pipeline} disabled={pipe.isPending} onChange={(e) => pipe.mutate(e.target.value as Settings["pipeline"])} className={cx(inputClass, "w-auto")}>
-            <option value="legacy">Legacy: search, score, docs</option>
-            <option value="redesign">Redesign: discover, shortlist, documents</option>
-          </select>
-          <span className="text-[11.5px] text-muted">Takes effect on the next scheduled run; nothing to re-register.</span>
-        </div>
         <form onSubmit={submit} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
           <div><label htmlFor="sch-every" className={labelClass}>Every (h)</label><input id="sch-every" type="number" min={1} max={24} value={form.every_hours} onChange={(e) => setForm({ ...form, every_hours: Number(e.target.value) })} className={inputClass} /></div>
           <div><label htmlFor="sch-start" className={labelClass}>From (IST)</label><input id="sch-start" type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className={inputClass} /></div>
@@ -85,7 +71,7 @@ export function SchedulePanel({ settings }: { settings: Settings }) {
             ))}
           </fieldset>
         </form>
-        <p className="m-0 text-muted">Runs {form.days.length === 7 ? "every day" : <b className="text-fg">{form.days.join(", ")}</b>} at <b className="num text-fg">{times.join(", ") || "—"}</b>: {redesign ? "discover, then shortlist, then documents" : "search, then score, then docs"}. Apply is never scheduled (it opens a browser and waits for you). Weekly reminder: <b className="text-fg">{DAY[settings.weekly_review.day]} {settings.weekly_review.time}</b>.</p>
+        <p className="m-0 text-muted">Runs {form.days.length === 7 ? "every day" : <b className="text-fg">{form.days.join(", ")}</b>} at <b className="num text-fg">{times.join(", ") || "—"}</b>: discovery, then scoring, then documents. Apply is never scheduled (it opens a browser and waits for you). Weekly reminder: <b className="text-fg">{DAY[settings.weekly_review.day]} {settings.weekly_review.time}</b>.</p>
 
         <div className="overflow-x-auto rounded-md border border-line">
           <table className="w-full min-w-[420px] border-collapse">

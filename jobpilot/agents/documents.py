@@ -1,11 +1,11 @@
 """
-Agent 3: Document Generation (the redesign). Runs alongside the old `docs` agent, which stays runnable.
+Agent 3: Document Generation.
 
     python -m jobpilot.agents.documents              # up to 10 shortlisted jobs without documents, best score first
     python -m jobpilot.agents.documents --limit 3
     python -m jobpilot.agents.documents --job-id 161
 
-Same engine as `docs` (legacy truth-first prompt, fact check that strips any skill, employer, institution
+Engine (truth-first prompt, fact check that strips any skill, employer, institution
 or number the master resume does not contain, date correction, ATS .docx writer, sha256 cache), plus:
 
 - Skip when the JOB's title is unknown (empty or a placeholder like "(untitled)").
@@ -28,49 +28,48 @@ from typing import Any
 from sqlalchemy import func, nulls_last
 from sqlmodel import Session, select
 
-from jobpilot.agents import docs
 from jobpilot.agents._run import RunRecorder, agent_run
 from jobpilot.db.models import Actor, AgentName, Job, JobStatus
 from jobpilot.db.repo import set_status
 from jobpilot.db.session import get_engine
 from jobpilot.discovery.titles import REGISTERED_TITLES
-from jobpilot.legacy import bridge
 from jobpilot.llm.cache import cache_get, cache_key, cache_put
 from jobpilot.llm.gemini import GeminiClient, LLMConfigError, LLMError, QuotaExhausted
 from jobpilot.resume import Resume, load_resume
+from jobpilot.tailoring import checks
 
-PROMPT_VERSION = docs.PROMPT_VERSION  # same prompt, so cached model answers are shared with the old docs agent
-MIN_JD_CHARS = docs.MIN_JD_CHARS
+PROMPT_VERSION = checks.PROMPT_VERSION
+MIN_JD_CHARS = checks.MIN_JD_CHARS
 MIN_COVER_PARAGRAPHS = 2
 MIN_COVER_WORDS = 120  # the prompt asks for 250-350; below this the letter is a stub
 UNKNOWN_TITLES = {"", "untitled", "unknown", "n a", "na", "none", "null"}
 
-DocsError = docs.DocsError
+DocsError = checks.DocsError
 
 
 def job_title_known(title: str) -> bool:
-    return docs._norm(title or "") not in UNKNOWN_TITLES
+    return checks.norm(title or "") not in UNKNOWN_TITLES
 
 
 def is_registered_title(title: str, aliases: tuple[str, ...] | list[str] = REGISTERED_TITLES) -> bool:
     """Whole title (or each part of 'A | B' / 'A / B') equals a registered alternative title."""
-    known = {docs._norm(a) for a in aliases}
-    parts = [p for p in (docs._norm(x) for x in title.replace("/", "|").split("|")) if p]
+    known = {checks.norm(a) for a in aliases}
+    parts = [p for p in (checks.norm(x) for x in title.replace("/", "|").split("|")) if p]
     return bool(parts) and all(p in known for p in parts)
 
 
 def verify_titles_and_dates(application: Any, master: str, aliases: tuple[str, ...] | list[str] = REGISTERED_TITLES) -> list[str]:
-    """Like docs.verify_titles_and_dates, but a registered alternative title is a valid title."""
+    """Like checks.verify_titles_and_dates, but a registered alternative title is a valid title."""
     notes: list[str] = []
-    master_norm = docs._norm(master)
+    master_norm = checks.norm(master)
     for entry in application.experience:
-        if entry.title and docs._norm(entry.title) not in master_norm:
+        if entry.title and checks.norm(entry.title) not in master_norm:
             if not is_registered_title(entry.title, aliases):
                 raise DocsError(f"Title '{entry.title}' at {entry.company} is not in the master resume")
             notes.append(f"Title '{entry.title}' at {entry.company} accepted as a registered alternative title")
-        if entry.dates and docs._norm(entry.dates) in master_norm:
+        if entry.dates and checks.norm(entry.dates) in master_norm:
             continue
-        options = docs.master_dates_for(entry.company, master)
+        options = checks.master_dates_for(entry.company, master)
         if len(options) == 1:
             notes.append(f"Corrected dates for {entry.company}: '{entry.dates or '(none)'}' -> '{options[0]}'")
             entry.dates = options[0]
@@ -102,7 +101,7 @@ def select_jobs(session: Session, limit: int, job_id: int | None) -> list[Job]:
 def generate_one(job: Job, resume: Resume, client: Any, session: Session, log) -> dict[str, Any]:
     if not job_title_known(job.title):
         raise DocsError("Job title is unknown")
-    tailor, docx_writer, generator = bridge.tailoring()
+    from jobpilot.tailoring import docx_writer, generator, tailor
     legacy_job = {"title": job.title, "company": job.company, "location": job.location, "description": job.jd_text,
                   "experience": f"{job.exp_min}-{job.exp_max} years" if job.exp_min is not None else "",
                   "job_url": job.url, "match_score": job.score, "match_category": ""}
@@ -138,7 +137,7 @@ def generate_one(job: Job, resume: Resume, client: Any, session: Session, log) -
     application = tailor.score_keywords(application)
     application.fact_check_warnings += notes
 
-    contact = docs.contact_details()
+    contact = checks.contact_details()
     if contact.get("full_name"):
         application.candidate.name = contact["full_name"]
     parts = [contact.get(k, "") for k in ("email", "phone", "current_location", "linkedin") if contact.get(k)]
@@ -146,7 +145,7 @@ def generate_one(job: Job, resume: Resume, client: Any, session: Session, log) -
         application.candidate.contact_line = " | ".join(parts)
 
     slug = generator.slug
-    folder = docs.OUTPUT_DIR / f"{slug(job.company, 30)}_{job.id}"
+    folder = checks.OUTPUT_DIR / f"{slug(job.company, 30)}_{job.id}"
     person = slug(application.candidate.name or "Candidate", 30)
     short_title = job.title if len(job.title) <= 120 else job.title[:117].rstrip() + "..."
     resume_file = docx_writer.write_resume(application, folder / f"{person}_Resume_{slug(job.company, 30)}.docx", short_title)
@@ -196,7 +195,7 @@ def make_documents(session: Session, rec: RunRecorder, client: Any, resume: Resu
 
 def run(limit: int = 10, job_id: int | None = None, db_url: str | None = None, client: Any = None,
         run_id: int | None = None) -> None:
-    with agent_run(AgentName.docs, db_url, run_id) as rec:
+    with agent_run(AgentName.documents, db_url, run_id) as rec:
         resume = load_resume()
         with Session(get_engine(db_url)) as session:
             make_documents(session, rec, client, resume, limit, job_id)

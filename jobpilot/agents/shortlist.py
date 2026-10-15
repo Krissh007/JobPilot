@@ -11,7 +11,7 @@ Agent 2: Scoring & Shortlisting (the redesign). Runs alongside the old `score` a
 3. Gemini is the sole judge of everything that passes. score >= `threshold` (60) moves found -> shortlisted;
    below it the job stays `found` with its score set, so it is not scored twice.
 4. Gemini places each job in an AI tier: core (no cap), adjacent = working on AI products/platforms or ML-driven
-   analytics (no cap), non_ai (capped at 59 in code, not just in the prompt). The tier is stored in score_reason.
+   analytics (no cap), non_ai (capped at 65 in code, not just in the prompt). The tier is stored in score_reason.
 5. --job-ids re-scores exactly those jobs; a shortlisted job that drops below the threshold goes back to `found`
    (unless documents already exist).
 
@@ -28,7 +28,8 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from jobpilot.agents._run import RunRecorder, agent_run
-from jobpilot.agents.score import MIN_JD_CHARS, JSONClient, build_prompt
+from jobpilot.discovery.prescore import role_adjustment
+from jobpilot.scoring.common import MIN_JD_CHARS, JSONClient, build_prompt
 from jobpilot.db.models import Actor, AgentName, Job, JobStatus
 from jobpilot.db.repo import get_setting, set_status
 from jobpilot.db.session import get_engine
@@ -39,7 +40,7 @@ from jobpilot.experience import experience_from_jd
 from jobpilot.scoring.gates import GATE_PREFIX, GateConfig, check_gates
 
 PROMPT_VERSION = "shortlist:v2"  # v2: three AI tiers replace the ai_role yes/no
-NON_AI_CAP = 59  # strictly below the shortlist threshold (60)
+NON_AI_CAP = 65  # non-AI roles can still reach the shortlist (threshold 60) but never outrank a strong AI role
 TIERS = ("core", "adjacent", "non_ai")
 TIER_LABEL = {"core": "AI-core", "adjacent": "AI-adjacent", "non_ai": "non-AI"}
 TIER_TAG = "[Tier: "  # score_reason ends with "[Tier: AI-core]"; the dashboard and tier_of() read it back
@@ -159,12 +160,14 @@ def select_jobs(session: Session, limit: int, job_id: int | None, job_ids: list[
     if job_id is not None:
         job = session.get(Job, job_id)
         return [job] if job else []
-    return list(session.exec(
+    waiting = session.exec(
         select(Job)
         .where(Job.status == JobStatus.found, Job.score.is_(None), Job.is_example.is_(False),
                func.length(Job.jd_text) >= MIN_JD_CHARS)
-        .order_by(Job.found_at.desc())  # no legacy-score ordering or floor
-        .limit(limit)))
+        .order_by(Job.found_at.desc())).all()
+    # Title relevance first (core BA/PA/PO titles, then neutral, then engineer/sales-type), newest first within a rank.
+    # sorted() is stable, so the newest-first order above survives inside each rank.
+    return sorted(waiting, key=lambda job: -role_adjustment(job.title))[:limit]
 
 
 def apply_result(session: Session, job: Job, result: ShortlistScore, resume: Resume, threshold: float) -> bool:
@@ -231,9 +234,9 @@ def shortlist_jobs(session: Session, rec: RunRecorder, client: JSONClient | None
         rec.log(f"{failed} job(s) could not be scored (invalid output after one retry); they stay unscored")
 
 
-def run(limit: int = 20, job_id: int | None = None, db_url: str | None = None, client: JSONClient | None = None,
+def run(limit: int = 60, job_id: int | None = None, db_url: str | None = None, client: JSONClient | None = None,
         run_id: int | None = None, dry_run: bool = False, job_ids: list[int] | None = None) -> None:
-    with agent_run(AgentName.score, db_url, run_id) as rec:
+    with agent_run(AgentName.scoring, db_url, run_id) as rec:
         resume = None if dry_run else load_resume()
         with Session(get_engine(db_url)) as session:
             shortlist_jobs(session, rec, client, resume, limit, job_id, dry_run, job_ids)
@@ -241,7 +244,7 @@ def run(limit: int = 20, job_id: int | None = None, db_url: str | None = None, c
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--limit", type=int, default=20, help="Max Gemini calls this run (free-tier friendly)")
+    parser.add_argument("--limit", type=int, default=60, help="Max Gemini calls this run (free-tier friendly)")
     parser.add_argument("--job-id", type=int, help="Score (or re-score) one job")
     parser.add_argument("--job-ids", type=int, nargs="+", help="Re-score exactly these jobs (e.g. after a prompt change)")
     parser.add_argument("--dry-run", action="store_true", help="Report gate rejections only; no Gemini, no writes")

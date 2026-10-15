@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from jobpilot.config import get_config
+from jobpilot.config import CONFIG_DIR, get_config
 
 
 class ResumeError(RuntimeError):
@@ -26,7 +26,7 @@ class Resume:
 
 def resume_path() -> Path:
     config = get_config()
-    return Path(config.resume_path) if config.resume_path else Path(config.legacy_agent_dir) / "config" / "master_resume.md"
+    return Path(config.resume_path) if config.resume_path else CONFIG_DIR / "master_resume.md"
 
 
 def load_resume(path: Path | None = None) -> Resume:
@@ -37,7 +37,7 @@ def load_resume(path: Path | None = None) -> Resume:
     if suffix in (".md", ".txt"):
         text = path.read_text(encoding="utf-8").strip()
     elif suffix in (".docx", ".pdf"):
-        from jobpilot.legacy.bridge import load_master_resume
+        from jobpilot.tailoring.master_resume import load_master_resume
 
         try:
             text = load_master_resume(path)  # same reader the tailoring uses, so both see identical text

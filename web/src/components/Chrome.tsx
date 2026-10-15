@@ -10,8 +10,8 @@ export function Header() {
   const { openJob, setTab, theme, setTheme, toast } = useUI();
   const qc = useQueryClient();
   const search = useMutation({
-    mutationFn: () => api.startRun("search", { then_score: true }),
-    onSuccess: (run) => { toast(`Search run #${run.id} started (then scoring). Follow it in Runs.`); setTab("runs"); qc.invalidateQueries({ queryKey: ["runs"] }); },
+    mutationFn: () => api.runNow(),
+    onSuccess: () => { toast("Run now started: Discovery, Scoring, Documents, then Apply (review only). Follow it in Runs."); setTab("runs"); qc.invalidateQueries({ queryKey: ["runs"] }); },
     onError: (e: Error) => toast(e.message),
   });
   const running = meta?.running ?? [];
@@ -32,7 +32,7 @@ export function Header() {
       <Button variant="ghost" size="sm" onClick={() => setTheme(nextTheme[theme])} title="Theme: system → light → dark" aria-label={`Theme: ${theme}`}>
         {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"} <span className="hidden lg:inline">{theme}</span>
       </Button>
-      <Button onClick={() => search.mutate()} disabled={search.isPending || running.some((r) => r.agent === "search")}>Run search</Button>
+      <Button onClick={() => search.mutate()} disabled={search.isPending || running.length > 0}>Run now</Button>
       <Button variant="primary" onClick={() => openJob("new")}>Add job<Kbd>N</Kbd></Button>
     </header>
   );

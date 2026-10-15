@@ -43,7 +43,7 @@ export function FiltersPanel({ settings }: { settings: Settings }) {
   const submit = (e: FormEvent) => { e.preventDefault(); save.mutate(); };
 
   return (
-    <Panel title="Search filters" actions={<span className="text-[12px] text-muted">{settings.pipeline === "redesign" ? "in use" : "used when the agents are set to Redesign"}</span>}>
+    <Panel title="Search filters" actions={<span className="text-[12px] text-muted">in use</span>}>
       <form onSubmit={submit} className="flex flex-col gap-3 p-3.5">
         <div className="grid grid-cols-2 gap-3">
           <div><label htmlFor="f-loc" className={labelClass}>Locations, one per line</label><textarea id="f-loc" rows={3} value={form.locations} onChange={(e) => setForm({ ...form, locations: e.target.value })} className={inputClass} /></div>

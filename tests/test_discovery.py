@@ -274,7 +274,7 @@ def test_agent_run_records_run_and_saves_found(db_url):
                  db_url=db_url, sources={"linkedin": src})
     with Session(get_engine(db_url)) as s:
         run = s.exec(select(AgentRun)).one()
-        assert run.agent == AgentName.search and run.status == RunStatus.ok and run.found == 1 and run.processed == 1
+        assert run.agent == AgentName.discovery and run.status == RunStatus.ok and run.found == 1 and run.processed == 1
         assert s.exec(select(Job)).one().status == JobStatus.found
 
 

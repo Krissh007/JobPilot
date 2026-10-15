@@ -27,8 +27,6 @@ from jobpilot.db.models import (
 from jobpilot.db.seed import seed
 from jobpilot.db.session import get_engine
 
-from tests.test_search_import import make_legacy
-
 
 @pytest.fixture
 def app(db_url):
@@ -220,27 +218,27 @@ class FakePopen:
 def test_start_run_builds_whitelisted_command(client, monkeypatch):
     FakePopen.started = []
     monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
-    response = client.post("/api/runs/score", json={"limit": 5})
+    response = client.post("/api/runs/scoring", json={"limit": 5})
     assert response.status_code == 202 and response.json()["status"] == "running"
     run_id = response.json()["id"]
     command = FakePopen.started[0]
-    assert command[1:] == ["-m", "jobpilot.agents.score", "--run-id", str(run_id), "--limit", "5"]
+    assert command[1:] == ["-m", "jobpilot.agents.shortlist", "--run-id", str(run_id), "--limit", "5"]
 
-    busy = client.post("/api/runs/score")
+    busy = client.post("/api/runs/scoring")
     assert busy.status_code == 409 and busy.json()["detail"]["run_id"] == run_id
-    assert client.post("/api/runs/search", json={"import_legacy_db": True, "then_score": True}).status_code == 202
-    assert FakePopen.started[1][-2:] == ["--import-legacy-db", "--then-score"]
+    assert client.post("/api/runs/discovery").status_code == 202
+    assert FakePopen.started[1][1:3] == ["-m", "jobpilot.agents.discover"]
     assert client.post("/api/runs/apply", json={"job_id": 7, "review_only": True}).status_code == 202
     assert FakePopen.started[2][1:] == ["-m", "jobpilot.agents.apply", "--run-id", FakePopen.started[2][4], "--job-id", "7", "--review-only"]
-    assert client.post("/api/runs/score", json={"limit": 9999}).status_code == 422
+    assert client.post("/api/runs/scoring", json={"limit": 9999}).status_code == 422
 
 
 def test_stale_running_row_does_not_block(client, db_url, monkeypatch):
     monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
     with session_for(db_url) as s:
-        s.add(AgentRun(agent=AgentName.score, status=RunStatus.running, started_at=utcnow() - timedelta(hours=5)))
+        s.add(AgentRun(agent=AgentName.scoring, status=RunStatus.running, started_at=utcnow() - timedelta(hours=5)))
         s.commit()
-    assert client.post("/api/runs/score").status_code == 202
+    assert client.post("/api/runs/scoring").status_code == 202
 
 
 def sse_events(text: str) -> list[tuple[str, str]]:
@@ -254,7 +252,7 @@ def sse_events(text: str) -> list[tuple[str, str]]:
 
 def test_stream_replays_log_and_ends(client, db_url):
     with session_for(db_url) as s:
-        run = AgentRun(agent=AgentName.score, status=RunStatus.ok, log="line one\nline two", finished_at=utcnow())
+        run = AgentRun(agent=AgentName.scoring, status=RunStatus.ok, log="line one\nline two", finished_at=utcnow())
         s.add(run)
         s.commit()
         run_id = run.id
@@ -263,20 +261,31 @@ def test_stream_replays_log_and_ends(client, db_url):
     assert client.get("/api/runs/999/stream").status_code == 404
 
 
-def test_real_subprocess_run_streams_to_completion(client, db_url, tmp_path, monkeypatch):
+def test_real_subprocess_run_streams_to_completion(client, db_url):
     """End to end: POST starts a real agent process; the SSE stream follows it until it finishes."""
-    legacy = make_legacy(tmp_path)
-    monkeypatch.setenv("LEGACY_AGENT_DIR", str(legacy))
-    run_id = client.post("/api/runs/search", json={"import_legacy_db": True}).json()["id"]
+    run_id = client.post("/api/runs/documents").json()["id"]
 
     events = sse_events(client.get(f"/api/runs/{run_id}/stream").text)
     assert events[-1] == ("end", {"status": "ok", "error": ""})
     log_lines = [data for kind, data in events if kind == "log"]
-    assert log_lines[0] == "Starting..." and log_lines[1].endswith(f"search run #{run_id} started")
-    assert any("3 new, 0 updated, 1 skipped" in line for line in log_lines)
+    assert log_lines[0] == "Starting..." and log_lines[1].endswith(f"documents run #{run_id} started")
     run = client.get(f"/api/runs/{run_id}").json()
-    assert run["status"] == "ok" and (run["found"], run["processed"]) == (3, 4)
-    assert client.get("/api/meta").json()["total_jobs"] == 3
+    assert run["status"] == "ok" and run["agent"] == "documents"
+
+
+def test_retired_agents_cannot_be_started_and_run_now_starts_the_pipeline(client, monkeypatch):
+    FakePopen.started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
+    for retired in ("search", "score", "docs"):
+        assert client.post(f"/api/runs/{retired}").status_code == 400
+    response = client.post("/api/runs/pipeline")
+    assert response.status_code == 202 and response.json()["started"] == ["discovery", "scoring", "documents", "apply"]
+    assert FakePopen.started[0][1:] == ["-m", "jobpilot.scheduled", "--now"]
+
+
+def test_four_agents_have_distinct_names_and_modules():
+    assert {a.value for a in runs_router.MODULES} == {"discovery", "scoring", "documents", "apply"}
+    assert len(set(runs_router.MODULES.values())) == 4
 
 
 def test_crashed_process_is_marked_error(client, db_url, monkeypatch):
@@ -285,7 +294,7 @@ def test_crashed_process_is_marked_error(client, db_url, monkeypatch):
             return 1
 
     monkeypatch.setattr(runs_router.subprocess, "Popen", DeadPopen)
-    run_id = client.post("/api/runs/score").json()["id"]
+    run_id = client.post("/api/runs/scoring").json()["id"]
     run = client.get(f"/api/runs/{run_id}").json()
     assert run["status"] == "error" and "exited with code 1" in run["error"]
 
@@ -294,7 +303,7 @@ def test_table_counts_and_system_info_never_leak_key(client, seeded):
     counts = client.get("/api/stats/tables").json()
     assert counts["jobs"] == 15 and counts["application_fields"] == 4 and counts["settings"] == 9
     info = client.get("/api/system").json()
-    assert set(info) >= {"gemini_model", "gemini_key_set", "legacy_agent_dir", "resume_path"}
+    assert set(info) >= {"gemini_model", "gemini_key_set", "resume_path"}
     from jobpilot.config import get_config
     key = get_config().gemini_api_key
     assert not key or key not in json.dumps(info)

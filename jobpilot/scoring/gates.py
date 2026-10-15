@@ -6,8 +6,10 @@ rule-score floor; everything that passes goes to Gemini, the only judge.
                         a location that names only somewhere else fails; an empty one passes.
     Experience 3-7 yrs  the job's stated range must overlap [exp_min, exp_max];
                         unknown or open-ended ("5+") ranges pass when they can still fit.
-    Role family         the title names an off-profile field (sterile operations, manufacturing, clinical, ...)
-                        and nothing business/product/analyst-like. A title with neither kind of word passes.
+    Role family         the title names an off-profile field (sterile operations, manufacturing, marketing, trainee,
+                        finance, customer support, ...) and nothing business/product/analyst-like. A title with
+                        neither kind of word passes. Intern / trainee / annotation titles are rejected outright.
+                        Always on; add words in Settings (scoring.avoid_title_words).
 """
 
 from __future__ import annotations
@@ -36,11 +38,20 @@ OFF_PROFILE_WORDS = (
     "sterile", "manufacturing", "production operator", "plant", "warehouse", "laboratory", "lab technician", "clinical",
     "nurse", "nursing", "pharmacist", "technician", "machine operator", "driver", "electrician", "mechanic", "welder",
     "housekeeping", "chef", "security guard", "telecaller", "field sales", "store manager", "teacher", "tutor",
+    # Found by the 16 Oct run: roles Gemini scored 22-65 that no business/product analyst search should reach.
+    "trainee", "intern", "internship", "marketing", "marketer", "sales", "growth", "demand generation", "social media",
+    "seo", "recruiter", "recruitment", "hr", "human resources", "accountant", "accounting", "finance", "financial",
+    "fp&a", "audit", "customer", "customer experience", "employee experience", "support", "non voice", "bpo",
+    "fundraising", "ngo", "content", "designer",
 )
 PROFILE_WORDS = (
     "analyst", "analytics", "product", "business", "bsa", "ba", "data", "consultant", "strategy", "program",
     "project", "insight", "requirement", "owner", "scrum", "functional", "systems", "process", "ai",
 )
+# Reject even when the title also has a profile word ("AI Automation Intern", "Data Annotation Analyst"): these are
+# internships, trainee programmes and labelling work, not 3-7 year analyst roles.
+HARD_OFF_WORDS = ("intern", "interns", "internship", "trainee", "annotation", "annotator", "labeling", "labelling")
+_HARD_OFF = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in HARD_OFF_WORDS) + r")\b", re.I)
 _OFF = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in OFF_PROFILE_WORDS) + r")\b", re.I)
 _PROFILE = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in PROFILE_WORDS) + r")\b", re.I)
 
@@ -82,6 +93,9 @@ def experience_gate(exp_min: int | None, exp_max: int | None, config: GateConfig
 def role_gate(title: str, config: GateConfig | None = None) -> GateResult:
     text = (title or "").strip()
     extra = [w.strip() for w in (config.avoid_title_words if config else []) if w.strip()]
+    hard = _HARD_OFF.search(text)
+    if hard:
+        return GateResult(False, f"off-profile role ({hard.group(0).lower()}): {text[:60]}")
     off = _OFF.search(text) or (re.search(r"\b(?:" + "|".join(re.escape(w) for w in extra) + r")\b", text, re.I) if extra else None)
     if off and not _PROFILE.search(text):
         return GateResult(False, f"off-profile role ({off.group(0).lower()}): {text[:60]}")

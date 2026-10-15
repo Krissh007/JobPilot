@@ -17,7 +17,7 @@ class DiscoveryConfig(BaseModel):
     max_cards_per_query: int = Field(60, ge=1)
     max_pages_per_query: int = Field(5, ge=1)
     enrich_per_query: int = Field(15, ge=0)   # the enrichment budget: full-description page loads per query
-    backlog_budget: int = Field(15, ge=0)    # description page loads per run for leftover unenriched `found` jobs
+    backlog_budget: int = Field(100, ge=0)    # description page loads per run for leftover unenriched `found` jobs
     exp_min: int = 3                          # pre-score preference only; the hard gate belongs to the Scoring agent
     exp_max: int = 7
     linkedin_easy_apply_only: bool = False

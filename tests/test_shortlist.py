@@ -116,11 +116,11 @@ def test_threshold_60_boundary(db_url):
     assert scores[below].status == JobStatus.found and scores[below].score == 59   # scored, not re-scored later
 
 
-def test_non_ai_role_capped_below_threshold_even_if_gemini_scores_high(db_url):
+def test_non_ai_role_capped_at_65_even_if_gemini_scores_high(db_url):
     job_id = add_job(db_url, title="Business Analyst")
     shortlist.run(db_url=db_url, client=FakeClient({**AI, "score": 92, "ai_tier": "non_ai"}))
     job = get(db_url, job_id)
-    assert job.score == 59 and job.status == JobStatus.found and "Capped" in job.score_reason
+    assert job.score == 65 and job.status == JobStatus.shortlisted and "Capped" in job.score_reason
 
 
 def test_ai_core_not_capped(db_url):
@@ -242,7 +242,7 @@ def test_adjacent_is_not_capped_but_non_ai_is(db_url):
     shortlist.run(db_url=db_url, client=ByJD())
     a, n = get(db_url, adjacent), get(db_url, non_ai)
     assert (a.score, a.status) == (90, JobStatus.shortlisted)
-    assert (n.score, n.status) == (59, JobStatus.found) and "[Capped: non-AI]" in n.score_reason
+    assert (n.score, n.status) == (65, JobStatus.shortlisted) and "[Capped: non-AI]" in n.score_reason
 
 
 def test_unknown_tier_value_is_invalid_then_retried(db_url):
@@ -271,9 +271,9 @@ def test_rescore_demotes_a_shortlisted_job_that_no_longer_qualifies(db_url):
     shortlist.run(db_url=db_url, client=FakeClient(AI))
     assert get(db_url, job_id).status == JobStatus.shortlisted
     new_prompt(db_url)
-    shortlist.run(db_url=db_url, job_ids=[job_id], client=FakeClient({**AI, "score": 90, "ai_tier": "non_ai"}))
+    shortlist.run(db_url=db_url, job_ids=[job_id], client=FakeClient({**AI, "score": 55, "ai_tier": "non_ai"}))
     job = get(db_url, job_id)
-    assert job.status == JobStatus.found and job.score == 59
+    assert job.status == JobStatus.found and job.score == 55
     with Session(get_engine(db_url)) as s:
         last = s.exec(select(StatusHistory).where(StatusHistory.job_id == job_id).order_by(StatusHistory.id.desc())).first()
     assert (last.from_status, last.to_status, last.actor) == (JobStatus.shortlisted, JobStatus.found, Actor.agent)
@@ -319,9 +319,9 @@ def test_role_gate_lets_business_and_unclear_titles_through(title):
 
 
 def test_role_gate_uses_your_extra_words():
-    cfg = GateConfig(avoid_title_words=["pharma sales"])
-    assert not check_gates("Hyderabad", None, None, cfg, title="Pharma Sales Officer").passed
-    assert check_gates("Hyderabad", None, None, title="Pharma Sales Officer").passed
+    cfg = GateConfig(avoid_title_words=["pharma representative"])
+    assert not check_gates("Hyderabad", None, None, cfg, title="Pharma Representative").passed
+    assert check_gates("Hyderabad", None, None, title="Pharma Representative").passed
 
 
 def test_shortlist_rejects_an_off_profile_job_without_calling_gemini(db_url):
@@ -332,3 +332,40 @@ def test_shortlist_rejects_an_off_profile_job_without_calling_gemini(db_url):
     job = get(db_url, off)
     assert job.status == JobStatus.rejected and job.notes.startswith(GATE_PREFIX) and "off-profile" in job.notes
     assert len(client.prompts) == 1 and get(db_url, ok).status != JobStatus.rejected
+
+
+# ---- 16 Oct: stronger role gate, title-ranked order, limit 60 ------------------------
+
+@pytest.mark.parametrize("title", ["Management Trainee (BBA/MBA)", "Customer & Employee Experience Specialist (CSAT, ESAT, and NPS surveys)",
+                                   "Digital Marketing Specialist", "Senior Accountant", "Sr. Manager - FP&A", "Inside Sales Executive"])
+def test_role_gate_rejects_the_off_profile_titles_the_first_real_run_let_through(title):
+    assert not check_gates("Hyderabad", 3, 5, title=title).passed
+
+
+@pytest.mark.parametrize("title", ["AI Automation Intern", "Data Annotation Analyst", "Associate Product Analyst - Intern",
+                                   "Business Analyst Trainee", "MBA Internship in Strategy", "Data Labelling Analyst"])
+def test_role_gate_rejects_interns_trainees_and_annotation_even_with_a_profile_word(title):
+    assert not check_gates("Hyderabad", 3, 5, title=title).passed
+
+
+@pytest.mark.parametrize("title", ["Customer Insights Analyst", "Support Business Analyst", "Marketing Analytics Consultant",
+                                   "Research Analyst", "Product Owner", "Finance Business Analyst", "Data Analyst", "Internal Audit Business Analyst"])
+def test_role_gate_keeps_titles_with_a_profile_word(title):
+    assert check_gates("Hyderabad", 3, 5, title=title).passed
+
+
+def test_unscored_jobs_are_taken_in_title_relevance_order_not_newest_first(db_url):
+    engineer = add_job(db_url, title="Java Developer")
+    neutral = add_job(db_url, title="Digital Specialist")
+    core_old = add_job(db_url, title="Business Analyst")
+    core_new = add_job(db_url, title="Product Owner")
+    with Session(get_engine(db_url)) as s:
+        order = [j.id for j in shortlist.select_jobs(s, 10, None)]
+        assert order[-1] == engineer and order[-2] == neutral
+        assert set(order[:2]) == {core_old, core_new} and order[0] == core_new      # newest first inside a rank
+        assert [j.id for j in shortlist.select_jobs(s, 1, None)] == [core_new]
+
+
+def test_default_limit_is_60():
+    import inspect
+    assert inspect.signature(shortlist.run).parameters["limit"].default == 60

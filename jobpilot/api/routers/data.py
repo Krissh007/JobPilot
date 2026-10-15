@@ -112,8 +112,6 @@ def system_info() -> dict[str, Any]:
         "gemini_fallback_models": config.gemini_fallback_models,
         "gemini_key_set": bool(config.gemini_api_key),
         "gemini_rpm": config.gemini_rpm,
-        "legacy_agent_dir": str(config.legacy_agent_dir),
-        "legacy_python": config.legacy_python,
         "resume_path": str(resume_path()),
     }
 

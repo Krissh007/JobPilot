@@ -1,7 +1,7 @@
 from sqlmodel import select
 
 from jobpilot.db.models import Answer
-from jobpilot.legacy.answers_import import import_answers
+from jobpilot.agents.apply.answers_import import import_answers
 
 PROFILE = {
     "contact": {"full_name": "K", "email": "k@example.com"},

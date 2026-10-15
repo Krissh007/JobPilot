@@ -1,5 +1,5 @@
 """
-Agent 1: Discovery (the redesign). Runs alongside the old `search` agent, which stays runnable.
+Agent 1: Discovery (the redesign). 
 
     python -m jobpilot.agents.discover                              # settings from the DB ('discovery' key)
     python -m jobpilot.agents.discover --sources linkedin --keywords "Business Analyst" --enrich-per-query 5
@@ -8,7 +8,7 @@ Agent 1: Discovery (the redesign). Runs alongside the old `search` agent, which 
 Writes jobs at status `found` (Scoring picks them up from there). After the queries it works the enrichment
 backlog: unenriched `found` jobs get their description freshest-first within `backlog_budget`; those past
 the freshness window are expired (found -> rejected, note "Expired: ...").
-agent_runs.found = new jobs saved, processed = cards fetched. Logged under the `search` agent name.
+agent_runs.found = new jobs saved, processed = cards fetched. Logged under the `discovery` agent name.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from jobpilot.discovery.sources.naukri import NaukriSource
 def run(overrides: dict | None = None, dry_run: bool = False, db_url: str | None = None,
         run_id: int | None = None, sources: dict | None = None) -> None:
     """`sources` lets tests inject fakes; otherwise a browser is launched for the configured portals."""
-    with agent_run(AgentName.search, db_url, run_id) as rec:
+    with agent_run(AgentName.discovery, db_url, run_id) as rec:
         with Session(get_engine(db_url)) as session:
             config = DiscoveryConfig(**{**DiscoveryConfig.from_settings(session).model_dump(), **(overrides or {})})
             queries = build_queries(config)

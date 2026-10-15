@@ -41,7 +41,7 @@ export interface Application {
   fields: AppField[]; needs_review: number;
 }
 
-export type AgentName = "search" | "score" | "docs" | "apply";
+export type AgentName = "discovery" | "scoring" | "documents" | "apply" | "search" | "score" | "docs"; // last three: retired, history only
 export interface Run {
   id: number; agent: AgentName; started_at: string; finished_at: string | null; found: number; processed: number;
   status: "running" | "ok" | "error"; error: string; is_example: boolean; log_lines: number; log?: string;
@@ -58,7 +58,6 @@ export interface DiscoveryFilters {
 export interface Settings {
   threshold: number; daily_apply_cap: number; search_queries: string[];
   schedule: { every_hours: number; start: string; end: string; timezone: string; days: string[]; times: string[] };
-  pipeline: "legacy" | "redesign";
   discovery: DiscoveryFilters;
   scoring: { exp_min: number; exp_max: number };
   auto_submit: boolean; park_incomplete: boolean; review_wait_minutes: number; linkedin_easy_apply_only: boolean;
@@ -74,7 +73,7 @@ export interface WeeklyReview {
 
 export interface SystemInfo {
   gemini_model: string; gemini_fallback_models: string; gemini_key_set: boolean; gemini_rpm: number;
-  legacy_agent_dir: string; legacy_python: string; resume_path: string;
+  resume_path: string;
 }
 
 export interface ScheduledTask {
@@ -140,6 +139,7 @@ export const api = {
   markSubmitted: (id: number) => request<Application>(`/applications/${id}/mark-submitted`, { method: "POST" }),
   runs: (limit = 50) => request<Run[]>(`/runs?limit=${limit}`),
   run: (id: number) => request<Run>(`/runs/${id}`),
+  runNow: () => request<{ started: AgentName[]; log: string }>("/runs/pipeline", { method: "POST" }),
   startRun: (agent: AgentName, options: Record<string, unknown> = {}) => request<Run>(`/runs/${agent}`, { method: "POST", ...json(options) }),
   answers: () => request<Answer[]>("/answers"),
   createAnswer: (body: Pick<Answer, "question" | "answer" | "tags">) => request<Answer>("/answers", { method: "POST", ...json(body) }),

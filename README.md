@@ -1,6 +1,6 @@
 # JobPilot
 
-A local dashboard and SQLite pipeline on top of the existing job search agent (`E:\job_search_agent`):
+A local dashboard and SQLite pipeline with its own search, scoring, documents and apply code:
 search LinkedIn and Naukri, score every job against your resume with Gemini, write a fact-checked
 tailored resume and cover letter, and apply (LinkedIn Easy Apply and Naukri) one job at a time.
 **Nothing is submitted without your approval** unless you switch on auto-submit, and even then only
@@ -30,7 +30,7 @@ cd E:\JobPilot
 python -m venv .venv
 $env:PIP_CACHE_DIR = "E:\JobPilot\.cache\pip"
 .\.venv\Scripts\pip install -r requirements.txt     # includes Playwright; it drives your installed Chrome (no browser download)
-copy .env.example .env                              # then type GEMINI_API_KEY yourself; GEMINI_MODEL, RESUME_PATH, LEGACY_* as needed
+copy .env.example .env                              # then type GEMINI_API_KEY yourself; GEMINI_MODEL, RESUME_PATH as needed
 .\.venv\Scripts\alembic upgrade head                # creates data\jobpilot.db (WAL, FTS5)
 
 cd web
@@ -39,12 +39,12 @@ npm install
 npm run build                                       # the API serves web\dist at http://127.0.0.1:8000
 cd ..
 
-.\.venv\Scripts\python -m jobpilot.legacy.answers_import   # answer bank from the legacy application_profile.yaml
+.\.venv\Scripts\python -m jobpilot.agents.apply.answers_import   # answer bank from config\application_profile.yaml
 
 # Sign in once per portal in the agent's own browser profile (you type the password or OTP; JobPilot never sees it):
-cd E:\job_search_agent
-python -m src.apply.linkedin login
-python -m src.apply.naukri login
+cd E:\JobPilot
+python -m jobpilot.agents.apply.login linkedin
+python -m jobpilot.agents.apply.login naukri
 
 powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1   # or Settings -> Schedule -> Register
 ```
@@ -52,43 +52,35 @@ powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1 
 Optional: `.\.venv\Scripts\python -m jobpilot.db.seed` adds 15 fictional example jobs (marked *example*);
 `--purge` or Database -> Remove examples deletes them again.
 
-## Search agent
+## Discovery agent
 
-**There is one database: `data\jobpilot.db`.** The search agent runs two stages of the legacy agent's code
-from `E:\job_search_agent`, unchanged and with the legacy agent's own Python:
-- **Browser discovery:** it skips URLs JobPilot already has.
-- **Rule-based matching:** the legacy quality gates apply here.
-
-The matched jobs stream straight into `jobpilot.db`. The legacy save, tailor, export and sync stages are not
-called, so the legacy `jobs.db`, its Excel exports and `project_sync` files are never written. The old
-`jobs.db` is kept as an archive and was imported once.
+**There is one database: `data\jobpilot.db`.** Discovery searches Naukri (paging by clicking Next) and LinkedIn,
+ranks the result cards by title (core BA / product-analyst titles first, engineering titles last), skips
+what the database already has and saves new jobs as `found`. Then it fetches descriptions for the leftover
+unenriched jobs, freshest first, and expires the ones past the freshness window.
 
 ```powershell
-.\.venv\Scripts\python -m jobpilot.agents.search                    # browser search, saved into jobpilot.db
-.\.venv\Scripts\python -m jobpilot.agents.search --then-score       # search, then Gemini scoring
-.\.venv\Scripts\python -m jobpilot.agents.search --keywords "AI Business Analyst" --sources naukri
-.\.venv\Scripts\python -m jobpilot.agents.search --import-legacy-db # one-off: copy from the old jobs.db archive (read-only)
+.\.venv\Scripts\python -m jobpilot.agents.discover                              # filters from Settings
+.\.venv\Scripts\python -m jobpilot.agents.discover --sources naukri --keywords "Business Analyst" --max-pages-per-query 3
+.\.venv\Scripts\python -m jobpilot.agents.discover --dry-run                    # print the planned queries, open no browser
 ```
 
-When jobs are copied from the old archive, statuses are mapped once: new/review → found, shortlisted,
-applied, interviewing → interview, offer, skipped → rejected. Rows the legacy gates rejected are skipped.
-Paths come from `LEGACY_AGENT_DIR` and `LEGACY_PYTHON` in `.env`.
+**Run now** (dashboard header, or `python -m jobpilot.scheduled --now`) runs all four agents in order: Discovery,
+Scoring, Documents, then Apply in review-only mode. Each agent logs under its own name in the Runs screen.
 
-Searching LinkedIn or Naukri with automation may break their user agreements. The legacy agent paces
-its requests. Keep runs infrequent.
+Searching LinkedIn or Naukri with automation may break their user agreements. Keep runs infrequent.
 
-## Score agent
+## Scoring agent
 
 Gemini scores each unscored job description against your master resume. The resume defaults to the
-legacy agent's `config\master_resume.md`; set `RESUME_PATH` in `.env` to change it. Each job gets an
+`config\master_resume.md`; set `RESUME_PATH` in `.env` to change it. Each job gets an
 overall score plus skills, experience and domain sub-scores, a reason, and lists of matched and missing skills.
 Jobs at or above the threshold setting (default 60) move from found to shortlisted.
 
 ```powershell
-.\.venv\Scripts\python -m jobpilot.agents.score              # up to 20 jobs, best legacy score first
-.\.venv\Scripts\python -m jobpilot.agents.score --limit 5
-.\.venv\Scripts\python -m jobpilot.agents.score --job-id 42  # re-score one job
-.\.venv\Scripts\python -m jobpilot.agents.search --then-score
+.\.venv\Scripts\python -m jobpilot.agents.shortlist              # up to 20 jobs
+.\.venv\Scripts\python -m jobpilot.agents.shortlist --limit 5
+.\.venv\Scripts\python -m jobpilot.agents.shortlist --job-id 42  # re-score one job
 ```
 
 Free tier:
@@ -102,15 +94,15 @@ Free tier:
 - Scoring uses `gemini-3.5-flash-lite` (set in `.env`). It is fast and its free quota is much larger, and it
   keeps the stronger model's small daily quota free for tailored documents.
 - Domain is judged only from the role's own responsibilities. Naukri's "Department: Data Science &
-  Analytics" label and the company's "About" text are ignored. Roles with no AI/ML component are capped at 70.
+  Analytics" label and the company's "About" text are ignored. Roles with no AI/ML component are capped at 65.
 
 On Gemini's free tier, Google may use what you send (your resume and the JDs) to improve its products.
 
-## Docs agent (tailored resume + cover letter)
+## Documents agent (tailored resume + cover letter)
 
 ```powershell
-.\.venv\Scripts\python -m jobpilot.agents.docs              # up to 10 shortlisted jobs without documents
-.\.venv\Scripts\python -m jobpilot.agents.docs --job-id 111 # (re)generate for one job
+.\.venv\Scripts\python -m jobpilot.agents.documents         # up to 10 shortlisted jobs without documents
+.\.venv\Scripts\python -m jobpilot.agents.documents --job-id 111 # (re)generate for one job
 ```
 
 For each shortlisted job it writes `output\<Company>_<id>\` with these files:
@@ -120,7 +112,7 @@ For each shortlisted job it writes `output\<Company>_<id>\` with these files:
 
 It then moves the job to **Docs ready**.
 
-**Truthfulness.** The legacy tailoring is reused unchanged. Its prompt allows only facts from the master resume, and its fact check removes:
+**Truthfulness.** The tailoring code lives in `jobpilot/tailoring`. Its prompt allows only facts from the master resume, and its fact check removes:
 - skills, companies, institutions and certifications that aren't in the resume;
 - bullets and sentences containing numbers that aren't in the resume.
 
@@ -176,7 +168,7 @@ The dashboard is built with React, Vite, Tailwind and TypeScript. It uses the "L
 | **Review** | Filled fields with where each value came from (Gemini drafts and empty or consent fields highlighted), a screenshot, and Approve submit / Skip. Approve is locked while a form is stuck before its Submit page. For Naukri it says nothing has been sent yet (Apply is the submit). Blocked applications are listed separately |
 | **Runs** | Run now for search, score, docs and apply (apply has a review-only option), with a live log over Server-Sent Events, plus run history with logs |
 | **Answers** | Add, edit and delete screening answers; open questions the apply agent met are highlighted; the weekly review card |
-| **Database** | Table cards with row counts, CSV/JSON export, import from the legacy archive, and removing or adding the example rows |
+| **Database** | Table cards with row counts, CSV/JSON export, and removing or adding the example rows |
 | **Analytics** | Stat tiles (jobs tracked, shortlisted, applied, interviews), the pipeline funnel, the fit-score histogram with the threshold marked, and applications per day (30/90 days). Hover any bar for its value; every chart has a Table view; example rows are left out unless ticked |
 | **Settings** | Threshold, daily cap, search queries, LinkedIn Easy-Apply-only, the auto-submit switch, review wait, weekly review time, the Windows schedule (status, Register / Update / Remove), Gemini model and key status (the key is never shown), and the site-terms warning |
 
@@ -187,10 +179,10 @@ Keyboard: `/` jumps to search, `N` adds a job, `Esc` closes the drawer.
 ```powershell
 .venv\Scripts\python.exe -m jobpilot.agents.apply --review-only --limit 1   # fill one form, wait for you
 .venv\Scripts\python.exe -m jobpilot.agents.apply --job-id 190 --review-only
-.venv\Scripts\python.exe -m jobpilot.legacy.answers_import                 # one-off: answer bank from the legacy profile
+.venv\Scripts\python.exe -m jobpilot.agents.apply.answers_import         # one-off: answer bank from config\application_profile.yaml
 ```
 
-- Uses your **installed Chrome** with the legacy signed-in profile (`E:\job_search_agent\data\browser_profile`), headed, one tab, a 20–90 s random pause between jobs, and the daily cap. It never types a password.
+- Uses your **installed Chrome** with the signed-in profile (`data\browser_profile`), headed, one tab, a 20–90 s random pause between jobs, and the daily cap. It never types a password.
 - Every field records its source: resume/profile, answer bank, or a Gemini draft (Gemini only answers from your resume and may leave a field empty). Unknown questions are added to the answer bank as open questions.
 - **Consent, terms and privacy questions are never ticked or answered by the agent**, even if the answer bank has one.
 - It stops on LinkedIn's Submit page, saves a screenshot, sends a Windows toast and waits (default 20 min) for Approve or Skip in the Review queue. If it couldn't reach the Submit page, the application is marked *incomplete*: finish it in the agent's Chrome window and either Approve (it unlocks once the form reaches Submit) or submit it there yourself; JobPilot records it either way.
@@ -233,7 +225,7 @@ standby, hence the catch-up task; a run Windows starts more than 30 min after th
 ```
 
 - Database, dedupe, import, scorer, docs and API tests use a fresh database built by the real migrations; Gemini is faked.
-- The apply tests run the real legacy fillers against fake LinkedIn and Naukri pages in headless Chrome, and
+- The apply tests run the real fillers against fake LinkedIn and Naukri pages in headless Chrome, and
   prove nothing is submitted without permission (Submit/Apply clicks are counted).
 - The UI smoke test serves `web\dist` from the real API on a temporary seeded database and clicks through every
   screen in headless Chrome: moves a job, checks chart tooltips and tables, the theme toggle, no console errors,
@@ -245,7 +237,7 @@ standby, hence the catch-up task; a run Windows starts more than 30 min after th
 |---|---|
 | `[Errno 10048] ... 8000` when starting the API | JobPilot is already running. Use the updated `run_api.ps1` (it says so), or add `-Restart` |
 | http://127.0.0.1:8000 says `{"detail":"Not Found"}` | The running API is older than the build, or `web\dist` is missing: `npm run build` in `web`, then `run_api.ps1 -Restart` |
-| A run says "Not signed in to linkedin/naukri" | Run the matching `python -m src.apply.<portal> login` in `E:\job_search_agent` and sign in yourself |
+| A run says "Not signed in to linkedin/naukri" | Run `python -m jobpilot.agents.apply.login <portal>` in `E:\JobPilot` and sign in yourself |
 | An application is *blocked* | LinkedIn or Naukri showed a CAPTCHA, OTP or login page. Deal with it in the agent's Chrome window; JobPilot never solves them |
 | Scheduled runs don't appear | Settings -> Schedule shows the tasks and the last scheduled log; the PC must be on and you logged in |
 | pip or npm fails with "no space" | C: is full; set `PIP_CACHE_DIR`, `npm_config_cache` and `TMP` to folders under `E:\JobPilot\.cache` |

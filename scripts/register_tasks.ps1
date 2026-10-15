@@ -4,7 +4,6 @@ Times come from the dashboard Settings (schedule + weekly review); run this agai
 
   JobPilot Search-Score-Docs      on the chosen days: from <start> every <every_hours> h for the window,
                                   or at each explicit time if Settings lists run times       -> python -m jobpilot.scheduled
-                                  (the `pipeline` setting picks the agents: legacy or redesign)
   JobPilot Weekly-Answer-Review   weekly on <day> at <time>                                   -> python -m jobpilot.weekly
   JobPilot Catch-up               on sign-in, unlock and wake from sleep (2 min delay)         -> python -m jobpilot.scheduled --catch-up
                                   runs a pass only when the last search is overdue (Windows doesn't
@@ -61,7 +60,7 @@ if ($runTimes.Count -gt 0) {
     $when = "from $($cfg.start), every $($cfg.every_hours) h for $($cfg.window_minutes / 60) h"
 }
 $dayText = if ($everyDay) { "daily" } else { ($dayNames -join "/") }
-$steps = if ($cfg.pipeline -eq "redesign") { "discover -> shortlist -> documents" } else { "search -> score -> docs" }
+$steps = "discovery -> scoring -> documents"
 $pipelineAction = New-ScheduledTaskAction -Execute $pythonw -Argument "-m jobpilot.scheduled --log" -WorkingDirectory $root
 
 $weeklyTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days[$cfg.weekly_day] -At $cfg.weekly_time

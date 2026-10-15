@@ -47,7 +47,7 @@ from jobpilot.agents.apply.answers import AnswerBank, load_contact, make_drafter
 from jobpilot.agents.apply.filler import easy_apply_module, make_filler_class
 from jobpilot.agents.apply.naukri import READY, make_naukri_applier, naukri_module
 from jobpilot.api.deps import ist_date, today_ist
-from jobpilot.config import DATA_DIR, get_config
+from jobpilot.config import DATA_DIR, browser_profile_dir, get_config
 from jobpilot.db.models import (
     Actor,
     AgentName,
@@ -101,10 +101,10 @@ def check_security(page: Any) -> None:
 
 @contextmanager
 def signed_in_browser() -> Iterator[Any]:
-    """Your legacy agent's persistent Chrome profile (already signed in), visible window."""
+    """The agent's persistent Chrome profile (already signed in), visible window."""
     from playwright.sync_api import sync_playwright
 
-    profile = Path(get_config().legacy_agent_dir) / "data" / "browser_profile"
+    profile = browser_profile_dir()
     with sync_playwright() as playwright:
         try:
             browser = playwright.chromium.launch_persistent_context(
@@ -127,7 +127,7 @@ def is_signed_in(browser: Any, source: str = "linkedin") -> bool:
     return any(c["name"] == SESSION_COOKIE and c["value"] for c in browser.cookies("https://www.linkedin.com"))
 
 
-LOGIN_HINT = {"linkedin": "python -m src.apply.linkedin login", "naukri": "python -m src.apply.naukri login"}
+LOGIN_HINT = {"linkedin": "python -m jobpilot.agents.apply.login linkedin", "naukri": "python -m jobpilot.agents.apply.login naukri"}
 
 
 def portal(job: Job) -> str:
@@ -139,6 +139,26 @@ def applied_today(session: Session) -> int:
     today = today_ist()
     rows = session.exec(select(Job.applied_at).where(Job.is_example.is_(False), Job.applied_at.is_not(None)))
     return sum(1 for value in rows if ist_date(value) == today)
+
+
+MAX_RELAUNCHES = 3  # times one run reopens Chrome after it was closed under it
+
+
+def browser_closed(error: Exception) -> bool:
+    """Playwright's TargetClosedError: the window (or Chrome) went away mid-job."""
+    return type(error).__name__ == "TargetClosedError" or "has been closed" in str(error)
+
+
+def close_unfinished(session: Session, job_id: int) -> int:
+    """An application left in `filling` by a dead browser blocks its job from the queue; close it as skipped."""
+    stuck = session.exec(select(Application).where(Application.job_id == job_id,
+                                                  Application.state == ApplicationState.filling)).all()
+    for app in stuck:
+        app.state, app.reason, app.decided_at = ApplicationState.skipped, "browser_closed", utcnow()
+        session.add(app)
+    session.commit()
+    return len(stuck)
+
 
 
 def supersede_parked(session: Session, job_id: int) -> int:
@@ -519,7 +539,7 @@ def process_naukri_job(session: Session, browser: Any, job: Job, rec: RunRecorde
 
 
 def run(job_id: int | None = None, review_only: bool = False, limit: int | None = None, db_url: str | None = None,
-        run_id: int | None = None,
+        run_id: int | None = None, max_jobs: int | None = None,
         browser_factory: Callable[[], Any] = signed_in_browser, pacing: Pacing | None = None,
         drafter_factory: Callable[..., Any] | None = None) -> None:
     pacing = pacing or Pacing()
@@ -545,57 +565,96 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
             def drafter_factory(job: Job):
                 return make_drafter(lambda: GeminiClient(on_retry=rec.log), session, resume, job, rec.log)
 
-        with browser_factory() as browser:
-            signed_out = {src for src in {portal(job) for job in jobs} if not is_signed_in(browser, src)}
-            for src in sorted(signed_out):
-                rec.log(f"Not signed in to {src} in the agent profile; skipping its jobs. "
-                        f"In E:\\job_search_agent run: {LOGIN_HINT.get(src, '')} (you type the password).")
-            jobs = [job for job in jobs if portal(job) not in signed_out]
-            if not jobs:
-                raise RuntimeError(f"Not signed in to {', '.join(sorted(signed_out))} in the agent profile. In "
-                                   f"E:\\job_search_agent run: {' / '.join(LOGIN_HINT.get(s, '') for s in sorted(signed_out))}")
-            for index, job in enumerate(jobs):
-                if budget <= 0:
-                    rec.log(f"Daily cap of {cap} reached; the rest wait for tomorrow")
-                    break
-                if limit and filled >= limit:
-                    rec.log(f"Reached the limit of {limit} filled form(s) for this run")
-                    break
-                if index:
-                    rec.log(f"Pausing {pacing.between_jobs():.0f}s before the next job")
-                rec.processed += 1
-                try:
-                    if portal(job) == "naukri":
-                        outcome = process_naukri_job(session, browser, job, rec, pacing, auto_submit=auto_submit,
-                                                     threshold=threshold, wait_minutes=wait_minutes,
-                                                     park_incomplete=park_incomplete)
-                    else:
-                        outcome = process_job(session, browser, job, rec, pacing, auto_submit=auto_submit, threshold=threshold,
-                                              wait_minutes=wait_minutes, drafter_factory=drafter_factory,
-                                              park_incomplete=park_incomplete)
-                except Blocked as error:
-                    notify("JobPilot: blocked", f"{error}. The browser is left on that page for you.")
-                    rec.log(f"BLOCKED at #{job.id} {job.company}: {error}. Stopping; the window stays open for 15 min.")
-                    deadline = time.monotonic() + 15 * 60
-                    while time.monotonic() < deadline and browser.pages:
-                        pacing.sleep(5)
+        queue = list(jobs)
+        checked = done = False
+        started = relaunches = 0
+        attempts: dict[int, int] = {}
+        while queue and not done:
+            try:
+                with browser_factory() as browser:
+                    if not checked:
+                        signed_out = {src for src in {portal(job) for job in queue} if not is_signed_in(browser, src)}
+                        for src in sorted(signed_out):
+                            rec.log(f"Not signed in to {src} in the agent profile; skipping its jobs. "
+                                    f"In E:\\JobPilot run: {LOGIN_HINT.get(src, '')} (you type the password).")
+                        queue = [job for job in queue if portal(job) not in signed_out]
+                        if not queue:
+                            raise RuntimeError(f"Not signed in to {', '.join(sorted(signed_out))} in the agent profile. In "
+                                               f"E:\\JobPilot run: {' / '.join(LOGIN_HINT.get(s, '') for s in sorted(signed_out))}")
+                        checked = True
+                    while queue:
+                        job = queue[0]
+                        if budget <= 0:
+                            rec.log(f"Daily cap of {cap} reached; the rest wait for tomorrow")
+                            done = True
+                            break
+                        if limit and filled >= limit:
+                            rec.log(f"Reached the limit of {limit} filled form(s) for this run")
+                            done = True
+                            break
+                        if max_jobs and len(attempts) >= max_jobs and job.id not in attempts:
+                            rec.log(f"Reached the limit of {max_jobs} job(s) attempted in this run")
+                            done = True
+                            break
+                        if started:
+                            rec.log(f"Pausing {pacing.between_jobs():.0f}s before the next job")
+                        started += 1
+                        attempts[job.id] = attempts.get(job.id, 0) + 1
+                        if attempts[job.id] == 1:
+                            rec.processed += 1
+                        try:
+                            if portal(job) == "naukri":
+                                outcome = process_naukri_job(session, browser, job, rec, pacing, auto_submit=auto_submit,
+                                                             threshold=threshold, wait_minutes=wait_minutes,
+                                                             park_incomplete=park_incomplete)
+                            else:
+                                outcome = process_job(session, browser, job, rec, pacing, auto_submit=auto_submit,
+                                                      threshold=threshold, wait_minutes=wait_minutes,
+                                                      drafter_factory=drafter_factory, park_incomplete=park_incomplete)
+                        except Blocked as error:
+                            notify("JobPilot: blocked", f"{error}. The browser is left on that page for you.")
+                            rec.log(f"BLOCKED at #{job.id} {job.company}: {error}. Stopping; the window stays open for 15 min.")
+                            deadline = time.monotonic() + 15 * 60
+                            while time.monotonic() < deadline and browser.pages:
+                                pacing.sleep(5)
+                            raise
+                        queue.pop(0)
+                        if outcome not in ("not_easy_apply", "external", "already_applied", "failed"):
+                            filled += 1
+                        if outcome == "submitted":
+                            rec.found += 1
+                            budget -= 1
+            except Blocked:
+                raise
+            except Exception as error:
+                if not browser_closed(error) or relaunches >= MAX_RELAUNCHES:
                     raise
-                if outcome not in ("not_easy_apply", "external", "already_applied", "failed"):
-                    filled += 1
-                if outcome == "submitted":
-                    rec.found += 1
-                    budget -= 1
-
+                relaunches += 1
+                session.rollback()
+                gone = queue[0] if queue else None
+                if gone is not None:
+                    close_unfinished(session, gone.id)
+                    if attempts.get(gone.id, 0) >= 2:
+                        queue.pop(0)
+                        rec.log(f"  #{gone.id} {gone.company}: the browser closed twice on this job; leaving it for a later run")
+                rec.log(f"The browser was closed ({str(error).splitlines()[0][:100]}); relaunching it "
+                        f"({relaunches}/{MAX_RELAUNCHES}) and continuing with {len(queue)} job(s)")
+                pacing.sleep(5)
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--job-id", type=int, help="Apply to this one job")
     parser.add_argument("--review-only", action="store_true", help="Never auto-submit in this run")
     parser.add_argument("--limit", type=int, help="Stop after this many forms were filled (non-Easy-Apply jobs don't count)")
+    parser.add_argument("--max-jobs", type=int, help="Stop after this many jobs were attempted, skipped ones included (this run only)")
+    parser.add_argument("--pause", type=float, nargs=2, metavar=("LOW", "HIGH"),
+                        help="Seconds to pause between jobs, random between LOW and HIGH (this run only; default 20 90)")
     parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    pacing = Pacing(low=args.pause[0], high=args.pause[1]) if args.pause else None
     try:
-        run(job_id=args.job_id, review_only=args.review_only, limit=args.limit, run_id=args.run_id)
+        run(job_id=args.job_id, review_only=args.review_only, limit=args.limit, run_id=args.run_id,
+            max_jobs=args.max_jobs, pacing=pacing)
     except Exception:
         sys.exit(1)
 

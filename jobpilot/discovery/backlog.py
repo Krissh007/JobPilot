@@ -15,7 +15,7 @@ from typing import Callable
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from jobpilot.agents.score import MIN_JD_CHARS
+from jobpilot.scoring.common import MIN_JD_CHARS
 from jobpilot.db.models import Actor, Job, JobStatus
 from jobpilot.db.repo import set_status
 from jobpilot.discovery.cards import Card

@@ -1,11 +1,11 @@
 """
-The scheduled pipeline Windows Task Scheduler runs (Phase 8): search -> score -> docs.
+The pipeline Windows Task Scheduler runs: discovery -> scoring -> documents. `--now` (the dashboard's Run now) adds apply.
 
-Which agents run is the `pipeline` setting: "legacy" (search, score, docs) or "redesign"
-(discover, shortlist, documents). When it runs is the `schedule` setting: a start/end window
+The scheduled pass runs discovery, scoring and documents. When it runs is the `schedule` setting: a start/end window
 repeated every N hours, or an explicit list of run times, on the chosen days of the week.
 
     python -m jobpilot.scheduled                  # one pass now, any time
+    python -m jobpilot.scheduled --now            # Run now: discovery, scoring, documents, then apply (review only)
     python -m jobpilot.scheduled --log            # what the task runs: logs to a file, skips late runs
     python -m jobpilot.scheduled --catch-up       # on sign-in/unlock/wake: a pass only if one is overdue
     python -m jobpilot.scheduled --print-config   # JSON used by scripts/register_tasks.ps1
@@ -60,8 +60,7 @@ def config(session: Session | None = None) -> dict:
     return {"tasks": TASKS, "start": schedule["start"], "every_hours": int(schedule["every_hours"]),
             "window_minutes": max(window, 0), "weekly_day": weekly["day"], "weekly_time": weekly["time"],
             "days": [d for d in ALL_DAYS if d in (schedule.get("days") or ALL_DAYS)],
-            "times": sorted(set(schedule.get("times") or [])),
-            "pipeline": get_setting(session, "pipeline")}
+            "times": sorted(set(schedule.get("times") or []))}
 
 
 def _minutes(clock: str) -> int:
@@ -121,17 +120,19 @@ def acquire_lock(lock: Path = LOCK) -> bool:
     return True
 
 
-def default_steps(pipeline: str | None = None) -> list[tuple[str, Callable[[], None]]]:
-    if pipeline is None:
-        with session_scope() as session:
-            pipeline = get_setting(session, "pipeline")
-    if pipeline == "redesign":
-        from jobpilot.agents import discover, documents, shortlist
+def default_steps() -> list[tuple[str, Callable[[], None]]]:
+    from jobpilot.agents import discover, documents, shortlist
 
-        return [("discover", discover.run), ("shortlist", shortlist.run), ("documents", documents.run)]
-    from jobpilot.agents import docs, score, search
+    return [("discovery", discover.run), ("scoring", shortlist.run), ("documents", documents.run)]
 
-    return [("search", search.run), ("score", score.run), ("docs", docs.run)]
+
+def run_now_steps() -> list[tuple[str, Callable[[], None]]]:
+    """ The four agents in order. Apply only fills forms and waits for you in Review; it never submits from here."""
+    from jobpilot.agents import discover, documents, shortlist
+    from jobpilot.agents.apply import runner
+
+    return [("discovery", discover.run), ("scoring", shortlist.run), ("documents", documents.run),
+            ("apply", lambda: runner.run(review_only=True))]
 
 
 def run_pipeline(steps: list[tuple[str, Callable[[], None]]] | None = None, lock: Path = LOCK) -> int:
@@ -175,7 +176,7 @@ def last_search_started(session: Session | None = None) -> datetime | None:
 
     started = session.exec(
         select(AgentRun.started_at)
-        .where(AgentRun.agent == AgentName.search, AgentRun.is_example.is_(False))
+        .where(AgentRun.agent.in_([AgentName.discovery, AgentName.search]), AgentRun.is_example.is_(False))
         .order_by(AgentRun.started_at.desc())
     ).first()
     if started is not None and started.tzinfo is None:  # SQLite returns naive UTC
@@ -204,6 +205,7 @@ def catch_up_due(now: datetime, cfg: dict, last_started: datetime | None) -> boo
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--now", action="store_true", help="Run all four agents once, now (what Run now does)")
     parser.add_argument("--print-config", action="store_true", help="Print the schedule settings as JSON and exit")
     parser.add_argument("--log", action="store_true", help=f"Append output to {LOG} (used by the scheduled task)")
     parser.add_argument("--catch-up", action="store_true",
@@ -212,6 +214,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.print_config:
         print(json.dumps(config()))
         return
+    if args.now:
+        sys.exit(run_pipeline(run_now_steps()))
     if args.catch_up:
         cfg = config()
         now = datetime.now().astimezone()

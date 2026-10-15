@@ -18,7 +18,7 @@ import yaml
 from sqlmodel import Session, select
 
 from jobpilot.db.models import Answer, FieldSource, Job, utcnow
-from jobpilot.legacy import bridge
+from jobpilot.config import application_profile_path
 from jobpilot.llm.cache import cache_get, cache_key, cache_put
 from jobpilot.resume import Resume
 
@@ -127,7 +127,7 @@ def make_drafter(client_factory: Callable[[], Any], session: Session, resume: Re
 
 
 def load_contact() -> dict[str, str]:
-    path = bridge.application_profile_path()
+    path = application_profile_path()
     if not path.is_file():
         return {}
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

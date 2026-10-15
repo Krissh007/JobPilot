@@ -9,13 +9,14 @@ import pytest
 from docx import Document
 from sqlmodel import Session, select
 
-from jobpilot.agents import docs, documents
+from jobpilot.agents import documents
+from jobpilot.tailoring import checks
 from jobpilot.db.models import Actor, AgentRun, Job, JobStatus
 from jobpilot.db.repo import set_status, upsert_job
 from jobpilot.db.session import get_engine
 from jobpilot.resume import Resume
-from tests.test_docs import GOOD as OLD_GOOD
-from tests.test_docs import MASTER, FakeClient
+from tests.doc_fixtures import GOOD as OLD_GOOD
+from tests.doc_fixtures import MASTER, FakeClient
 
 LETTER = ("I gather requirements for LLM features and work with twelve stakeholders using SQL and Power BI every week. "
           "That work taught me to turn ambiguous product ideas into clear, testable requirements that engineers can build. ")
@@ -27,8 +28,8 @@ GOOD["cover_letter"]["paragraphs"] = [LETTER * 2, LETTER * 2, "I write BRDs and 
 def setup(db_url, tmp_path, monkeypatch):
     resume = Resume(path=tmp_path / "Krishna_Resume.docx", text=MASTER)
     monkeypatch.setattr(documents, "load_resume", lambda: resume)
-    monkeypatch.setattr(docs, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(docs, "contact_details", lambda: {"full_name": "Krishna Test", "email": "k@example.com", "phone": "000"})
+    monkeypatch.setattr(checks, "OUTPUT_DIR", tmp_path / "output")
+    monkeypatch.setattr(checks, "contact_details", lambda: {"full_name": "Krishna Test", "email": "k@example.com", "phone": "000"})
     return db_url
 
 
@@ -106,15 +107,6 @@ def test_registered_alternative_title_is_accepted_and_noted(setup):
     assert job.status == JobStatus.docs_ready
     report = (Path(job.resume_path).parent / "match_report.md").read_text(encoding="utf-8")
     assert "Title 'Data Analyst' at Softic Digitech Pvt. Ltd. accepted as a registered alternative title" in report
-
-
-def test_old_docs_agent_still_skips_that_alias(setup, tmp_path, monkeypatch):
-    monkeypatch.setattr(docs, "load_resume", lambda: Resume(path=tmp_path / "r.docx", text=MASTER))
-    job_id = add_shortlisted(setup)
-    alias = copy.deepcopy(GOOD)
-    alias["experience"][1]["title"] = "Data Analyst"
-    docs.run(db_url=setup, client=FakeClient(alias))
-    assert get_job(setup, job_id).status == JobStatus.shortlisted       # unchanged legacy behaviour
 
 
 def test_unregistered_invented_title_still_skips(setup):

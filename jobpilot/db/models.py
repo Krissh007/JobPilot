@@ -33,10 +33,14 @@ class Actor(str, enum.Enum):
 
 
 class AgentName(str, enum.Enum):
+    """The four agents. `search`, `score` and `docs` are the retired pipeline's names; they stay so old runs still load."""
+    discovery = "discovery"
+    scoring = "scoring"
+    documents = "documents"
+    apply = "apply"
     search = "search"
     score = "score"
     docs = "docs"
-    apply = "apply"
 
 
 class RunStatus(str, enum.Enum):
@@ -203,8 +207,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "answers_reviewed_at": None,
     # Search LinkedIn with its Easy Apply filter (other LinkedIn jobs can't be applied to by the agent).
     "linkedin_easy_apply_only": True,
-    # Which agents the scheduled pass runs: "legacy" (search, score, docs) or "redesign" (discover, shortlist, documents).
-    "pipeline": "legacy",
     # Apply agent: a form stuck on missing answers is saved for you to finish (True) or held open and waited on (False).
     "park_incomplete": True,
     # Partial overrides for the redesign agents (jobpilot.discovery.config.DiscoveryConfig, jobpilot.scoring.gates.GateConfig).

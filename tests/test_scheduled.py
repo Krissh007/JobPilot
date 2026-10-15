@@ -46,7 +46,7 @@ def test_lock_skips_an_overlapping_pass(tmp_path):
 def test_config_matches_settings(session):
     assert scheduled.config(session) == {"tasks": scheduled.TASKS, "start": "08:00", "every_hours": 4,
                                          "window_minutes": 840, "weekly_day": "mon", "weekly_time": "09:00",
-                                         "days": scheduled.ALL_DAYS, "times": [], "pipeline": "legacy"}
+                                         "days": scheduled.ALL_DAYS, "times": []}
 
 
 def test_schedule_api_reports_tasks_and_registers(client: TestClient, monkeypatch):
@@ -143,7 +143,7 @@ def test_catch_up_exits_quietly_when_nothing_is_due(monkeypatch):
     assert exit_info.value.code == 0 and ran == []
 
 
-# ---- pipeline switch, days of the week, explicit run times ----------------------------
+# ---- days of the week, explicit run times ----------------------------
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
 TIMES = {**CFG, "times": ["09:30", "18:00"]}
@@ -153,34 +153,10 @@ def test_calendar_assumption():
     assert ist(9, 0, day=12).strftime("%a") == "Mon" and ist(9, 0, day=10).strftime("%a") == "Sat"
 
 
-def test_default_steps_follow_the_pipeline_setting(session):
-    from jobpilot.agents import discover, docs, documents, score, search, shortlist
+def test_default_steps_are_discovery_scoring_documents():
+    from jobpilot.agents import discover, documents, shortlist
 
-    assert scheduled.default_steps("legacy") == [("search", search.run), ("score", score.run), ("docs", docs.run)]
-    assert scheduled.default_steps("redesign") == [("discover", discover.run), ("shortlist", shortlist.run),
-                                                   ("documents", documents.run)]
-
-
-def test_default_steps_reads_the_setting_from_the_database(db_url, monkeypatch):
-    from contextlib import contextmanager
-
-    from sqlmodel import Session
-
-    from jobpilot.agents import discover
-    from jobpilot.db.repo import put_setting
-    from jobpilot.db.session import get_engine
-
-    @contextmanager
-    def scope():
-        with Session(get_engine(db_url)) as s:
-            yield s
-
-    monkeypatch.setattr(scheduled, "session_scope", scope)
-    assert scheduled.default_steps()[0][0] == "search"          # legacy until you switch it
-    with Session(get_engine(db_url)) as s:
-        put_setting(s, "pipeline", "redesign")
-        s.commit()
-    assert scheduled.default_steps()[0] == ("discover", discover.run)
+    assert scheduled.default_steps() == [("discovery", discover.run), ("scoring", shortlist.run), ("documents", documents.run)]
 
 
 def test_weekdays_only_blocks_the_weekend_for_late_runs_and_catch_up():
@@ -214,14 +190,13 @@ def test_explicit_times_catch_up():
     assert scheduled.catch_up_due(ist(9, 40, day=12), TIMES, None)
 
 
-def test_config_carries_days_times_and_pipeline(session):
+def test_config_carries_days_and_times(session):
     from jobpilot.db.repo import put_setting
 
     put_setting(session, "schedule", {"every_hours": 6, "start": "07:00", "end": "19:00", "timezone": "Asia/Kolkata",
                                       "days": ["fri", "mon"], "times": ["18:00", "09:30", "09:30"]})
-    put_setting(session, "pipeline", "redesign")
     cfg = scheduled.config(session)
-    assert cfg["days"] == ["mon", "fri"] and cfg["times"] == ["09:30", "18:00"] and cfg["pipeline"] == "redesign"
+    assert cfg["days"] == ["mon", "fri"] and cfg["times"] == ["09:30", "18:00"]
 
 
 def test_pipeline_log_line_names_the_steps(tmp_path, capsys):
@@ -231,18 +206,17 @@ def test_pipeline_log_line_names_the_steps(tmp_path, capsys):
 
 # ---- settings API: the filters you can set -------------------------------------------
 
-def test_settings_api_exposes_and_validates_pipeline_schedule_and_filters(client):
+def test_settings_api_exposes_and_validates_schedule_and_filters(client):
     body = client.get("/api/settings").json()
-    assert body["pipeline"] == "legacy" and body["schedule"]["days"] == scheduled.ALL_DAYS and body["schedule"]["times"] == []
+    assert body["schedule"]["days"] == scheduled.ALL_DAYS and body["schedule"]["times"] == []
     assert body["discovery"]["max_posted_days"] == 7 and body["discovery"]["locations"] == ["Hyderabad"]
     assert body["scoring"] == {"exp_min": 3, "exp_max": 7, "avoid_title_words": []}
 
     saved = client.put("/api/settings", json={
-        "pipeline": "redesign",
         "schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": ["sat", "mon", "tue"], "times": ["18:00", "09:30"]},
         "discovery": {"locations": ["Hyderabad", "Pune"], "max_posted_days": 3, "enrich_per_query": 5},
         "scoring": {"exp_max": 5}}).json()
-    assert saved["pipeline"] == "redesign" and saved["schedule"]["days"] == ["mon", "tue", "sat"]
+    assert saved["schedule"]["days"] == ["mon", "tue", "sat"]
     assert saved["schedule"]["times"] == ["09:30", "18:00"]
     assert saved["discovery"]["locations"] == ["Hyderabad", "Pune"] and saved["discovery"]["max_posted_days"] == 3
     assert saved["discovery"]["enrich_per_query"] == 5 and saved["discovery"]["use_variants"] is True   # untouched keys stay
@@ -254,7 +228,7 @@ def test_settings_api_exposes_and_validates_pipeline_schedule_and_filters(client
 
 
 @pytest.mark.parametrize("payload", [
-    {"pipeline": "turbo"},
+    {"auto_submit": "maybe"},
     {"schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": []}},
     {"schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": ["funday"]}},
     {"schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "times": ["25:00"]}},
@@ -265,4 +239,8 @@ def test_settings_api_exposes_and_validates_pipeline_schedule_and_filters(client
 ])
 def test_settings_api_rejects_bad_values(client, payload):
     assert client.put("/api/settings", json=payload).status_code == 422
-    assert client.get("/api/settings").json()["pipeline"] == "legacy"     # nothing was half-saved
+    assert client.get("/api/settings").json()["schedule"]["days"] == scheduled.ALL_DAYS     # nothing was half-saved
+
+
+def test_run_now_runs_the_four_agents_in_order_with_apply_review_only():
+    assert [name for name, _ in scheduled.run_now_steps()] == ["discovery", "scoring", "documents", "apply"]

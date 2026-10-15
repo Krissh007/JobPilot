@@ -510,3 +510,85 @@ def test_stuck_required_dropdown_is_named_even_without_a_labelled_error(db_url, 
     _, app, _, run = state(db_url, world)
     assert app.reason == "draft_saved"
     assert "CSPO or SAFe" in run.log and "didn't name" not in run.log
+
+
+# The Yes/No question on the real Aptita form: required only by the "*" in the question text, inputs carry no required flag.
+UNNAMED_RADIO = ('<div><div>Do you have exp in Go-to- Market Data Analyst?*</div>'
+                 '<div><fieldset role="radiogroup">'
+                 '<div><input type="radio" name="gtm" id="gtm1" aria-label="Do you have exp in Go-to- Market Data Analyst?"><label for="gtm1">Yes</label></div>'
+                 '<div><input type="radio" name="gtm" id="gtm2" aria-label="Do you have exp in Go-to- Market Data Analyst?"><label for="gtm2">No</label></div>'
+                 '</fieldset></div></div>')
+
+
+def test_stuck_unflagged_radio_group_is_named_from_its_asterisk(db_url, world, chrome):
+    make, _ = factory(chrome, extra=UNNAMED_RADIO)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    _, app, _, run = state(db_url, world)
+    assert app.reason == "draft_saved"
+    assert "Go-to- Market Data Analyst" in run.log and "didn't name" not in run.log and "did not name" not in run.log
+
+
+# ---- a closed browser is relaunched, not fatal ---------------------------------
+
+class TargetClosedError(Exception):
+    """Same name as Playwright's, which is what the runner recognises."""
+
+
+def closing_once(make, times: int = 1):
+    calls = {"launches": 0}
+
+    @contextmanager
+    def wrapped():
+        calls["launches"] += 1
+        with make() as context:
+            if calls["launches"] <= times:
+                class Dead:
+                    def __getattr__(self, name):
+                        return getattr(context, name)
+
+                    def new_page(self):
+                        raise TargetClosedError("BrowserContext.new_page: Target page, context or browser has been closed")
+                yield Dead()
+            else:
+                yield context
+
+    return wrapped, calls
+
+
+def test_closed_browser_is_relaunched_and_the_job_is_retried(db_url, world, chrome):
+    make, _ = factory(chrome)
+    wrapped, calls = closing_once(make)
+    runner.run(db_url=db_url, browser_factory=wrapped, pacing=FakePacing(db_url, decide=ApplicationState.skipped),
+               drafter_factory=lambda job: None)   # the retry parks in Review; "you" skip it so the run ends
+    with Session(get_engine(db_url)) as s:
+        apps = s.exec(select(Application).where(Application.job_id == world).order_by(Application.id)).all()
+        run = s.exec(select(AgentRun).order_by(AgentRun.id.desc())).first()
+    assert calls["launches"] == 2 and run.status == RunStatus.ok and "relaunching" in run.log
+    assert (apps[0].state, apps[0].reason) == (ApplicationState.skipped, "browser_closed")   # the dead attempt no longer blocks the job
+    assert apps[-1].reason != "browser_closed" and len(apps) == 2   # the retry reached the form
+
+
+def test_a_job_that_closes_the_browser_twice_is_dropped_and_the_run_still_ends_ok(db_url, world, chrome):
+    make, _ = factory(chrome)
+    wrapped, calls = closing_once(make, times=99)
+    runner.run(db_url=db_url, browser_factory=wrapped, pacing=FakePacing(), drafter_factory=lambda job: None)
+    with Session(get_engine(db_url)) as s:
+        run = s.exec(select(AgentRun).order_by(AgentRun.id.desc())).first()
+        apps = s.exec(select(Application).where(Application.job_id == world)).all()
+    assert calls["launches"] == 2 and run.status == RunStatus.ok and "closed twice on this job" in run.log
+    assert all(a.state == ApplicationState.skipped and a.reason == "browser_closed" for a in apps)   # nothing left blocking the job
+
+
+def test_max_jobs_stops_a_run_after_that_many_attempts(db_url, world, chrome):
+    with Session(get_engine(db_url)) as s:
+        for n in (2, 3):
+            upsert_job(s, {"title": "AI Business Analyst", "company": f"Beta{n}", "source": "linkedin",
+                           "url": f"https://www.linkedin.com/jobs/view/430000000{n}", "jd_text": "LLM requirements " * 30,
+                           "score": 80, "status": "docs_ready"})
+        s.commit()
+    make, _ = factory(chrome)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(db_url, decide=ApplicationState.skipped),
+               drafter_factory=lambda job: None, max_jobs=2)
+    with Session(get_engine(db_url)) as s:
+        run = s.exec(select(AgentRun).order_by(AgentRun.id.desc())).first()
+        assert run.processed == 2 and "limit of 2 job(s) attempted" in run.log

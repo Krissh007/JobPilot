@@ -15,7 +15,6 @@ from typing import Any
 
 from jobpilot.agents.apply.answers import AnswerBank
 from jobpilot.agents.apply.filler import FieldRecord, is_consent
-from jobpilot.legacy import bridge
 
 READY = "ready"
 
@@ -39,7 +38,9 @@ UNTICK_FOLLOW_JS = r"""() => {
 
 
 def naukri_module():
-    return bridge.naukri()
+    from jobpilot.agents.apply import naukri_applier
+
+    return naukri_applier
 
 
 def make_naukri_applier():
