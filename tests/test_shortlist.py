@@ -298,3 +298,37 @@ def test_rescore_only_touches_the_ids_given(db_url):
     client = FakeClient({**AI, "score": 70, "ai_tier": "adjacent"})
     shortlist.run(db_url=db_url, job_ids=[a], client=client)
     assert len(client.prompts) == 1 and get(db_url, a).score == 70 and get(db_url, b).score == 78
+
+
+# ---- role-family gate ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("title", [
+    "Team member - Sterile Operations", "Warehouse Executive", "Clinical Research Nurse", "Plant Manager", "Lab Technician",
+])
+def test_role_gate_rejects_clearly_off_profile_titles(title):
+    result = check_gates("Hyderabad", None, None, title=title)
+    assert not result.passed and result.reason.startswith("off-profile role")
+
+
+@pytest.mark.parametrize("title", [
+    "Business Analyst", "Clinical Data Analyst", "Operations Analyst", "Product Owner - Manufacturing Platforms",
+    "AI Product Manager", "Operations Manager", "Senior Executive",   # no off-profile word: Gemini decides
+])
+def test_role_gate_lets_business_and_unclear_titles_through(title):
+    assert check_gates("Hyderabad", None, None, title=title).passed
+
+
+def test_role_gate_uses_your_extra_words():
+    cfg = GateConfig(avoid_title_words=["pharma sales"])
+    assert not check_gates("Hyderabad", None, None, cfg, title="Pharma Sales Officer").passed
+    assert check_gates("Hyderabad", None, None, title="Pharma Sales Officer").passed
+
+
+def test_shortlist_rejects_an_off_profile_job_without_calling_gemini(db_url):
+    off = add_job(db_url, title="Team member - Sterile Operations")
+    ok = add_job(db_url, title="Operations Analyst")
+    client = FakeClient(AI)
+    shortlist.run(db_url=db_url, client=client)
+    job = get(db_url, off)
+    assert job.status == JobStatus.rejected and job.notes.startswith(GATE_PREFIX) and "off-profile" in job.notes
+    assert len(client.prompts) == 1 and get(db_url, ok).status != JobStatus.rejected

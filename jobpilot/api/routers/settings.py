@@ -65,6 +65,7 @@ class DiscoveryPatch(BaseModel):
 class ScoringPatch(BaseModel):
     exp_min: Optional[int] = Field(None, ge=0, le=40)
     exp_max: Optional[int] = Field(None, ge=0, le=40)
+    avoid_title_words: Optional[list[str]] = None
 
 
 class WeeklyReview(BaseModel):

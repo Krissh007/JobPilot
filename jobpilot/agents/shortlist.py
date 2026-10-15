@@ -136,10 +136,11 @@ def apply_gates(session: Session, rec: RunRecorder, gates: GateConfig, dry_run: 
         if job.exp_min is None and job.exp_max is None and job.jd_text:  # re-check once a description exists
             job.exp_min, job.exp_max = experience_from_jd(job.jd_text)
             session.add(job)
-        result = check_gates(job.location, job.exp_min, job.exp_max, gates)
+        result = check_gates(job.location, job.exp_min, job.exp_max, gates, title=job.title)
         if result.passed:
             continue
-        kind = "location" if result.reason.startswith("not India") else "experience"
+        kind = ("location" if result.reason.startswith("not India")
+                else "role" if result.reason.startswith("off-profile") else "experience")
         rejected[kind] = rejected.get(kind, 0) + 1
         rec.log(f"  gate{' (dry run)' if dry_run else ''}: #{job.id} {job.title} | {job.company}: {result.reason}")
         if not dry_run:

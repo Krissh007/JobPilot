@@ -235,7 +235,7 @@ def test_settings_api_exposes_and_validates_pipeline_schedule_and_filters(client
     body = client.get("/api/settings").json()
     assert body["pipeline"] == "legacy" and body["schedule"]["days"] == scheduled.ALL_DAYS and body["schedule"]["times"] == []
     assert body["discovery"]["max_posted_days"] == 7 and body["discovery"]["locations"] == ["Hyderabad"]
-    assert body["scoring"] == {"exp_min": 3, "exp_max": 7}
+    assert body["scoring"] == {"exp_min": 3, "exp_max": 7, "avoid_title_words": []}
 
     saved = client.put("/api/settings", json={
         "pipeline": "redesign",
@@ -246,7 +246,7 @@ def test_settings_api_exposes_and_validates_pipeline_schedule_and_filters(client
     assert saved["schedule"]["times"] == ["09:30", "18:00"]
     assert saved["discovery"]["locations"] == ["Hyderabad", "Pune"] and saved["discovery"]["max_posted_days"] == 3
     assert saved["discovery"]["enrich_per_query"] == 5 and saved["discovery"]["use_variants"] is True   # untouched keys stay
-    assert saved["scoring"] == {"exp_min": 3, "exp_max": 5}
+    assert saved["scoring"] == {"exp_min": 3, "exp_max": 5, "avoid_title_words": []}
 
     # a second partial patch keeps the first
     again = client.put("/api/settings", json={"discovery": {"max_posted_days": 14}}).json()
