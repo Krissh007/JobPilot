@@ -15,6 +15,8 @@ from jobpilot.discovery.sources.base import Query, QueryBlocked
 BASE_URL = "https://www.naukri.com"
 BLOCK_TERMS = ("captcha", "verify you are human", "access denied", "security check",
                "login to continue", "sign in to continue", "register to continue")
+# Naukri is a single-page app: changing the page number in the URL re-shows page 1's results. Paging has to click Next.
+NEXT_SELECTORS = ("a[aria-label='Next']", "button[aria-label='Next']", "a[rel='next']", "a:has-text('Next')", "button:has-text('Next')")
 DETAIL_SELECTORS = ("section[class*='job-desc']", "div[class*='dang-inner-html']", "[class*='JDC']", "div.job-desc")
 
 # Runs in the page: returns [{title, company, location, experience, posted, url, snippet}] for each result card.
@@ -87,8 +89,11 @@ class NaukriSource:
         cards: list[Card] = []
         seen: set[str] = set()
         for number in range(1, max_pages + 1):
-            self.page.goto(self.search_url(query, number), wait_until="domcontentloaded", timeout=60_000)
-            self.page.wait_for_timeout(3_000)
+            if number == 1:
+                self.page.goto(self.search_url(query, 1), wait_until="domcontentloaded", timeout=60_000)
+                self.page.wait_for_timeout(3_000)
+            elif not self._click_next():
+                break
             if self._blocked(self.page):
                 if cards:
                     break
@@ -102,6 +107,22 @@ class NaukriSource:
             if len(cards) >= max_cards:
                 break
         return cards[:max_cards]
+
+    def _click_next(self) -> bool:
+        """Click the results page's Next button. False when there is none (last page) or it is disabled."""
+        for selector in NEXT_SELECTORS:
+            try:
+                button = self.page.locator(selector).last
+                if button.count() == 0 or not button.is_visible():
+                    continue
+                if button.get_attribute("disabled") is not None:
+                    return False
+                button.click(timeout=5_000)
+                self.page.wait_for_timeout(3_000)
+                return True
+            except Exception:
+                continue
+        return False
 
     def enrich(self, card: Card) -> Card:
         if self._detail_page is None:

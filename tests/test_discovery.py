@@ -400,3 +400,88 @@ def test_backlog_runs_after_discovery_in_agent(db_url):
     with Session(get_engine(db_url)) as s:
         assert len(s.exec(select(Job)).one().jd_text) > 100
         assert "Backlog: expired 0, enriched 1" in s.exec(select(AgentRun)).one().log
+
+
+# ---- Naukri pages by clicking Next (the URL page number is ignored by the site) ----------------
+
+class FakeNaukriPage:
+    """Results page whose address-bar page number is ignored, like the real site: only the Next button advances."""
+
+    def __init__(self, pages, next_after_last=False):
+        self.pages, self.index, self.gotos, self.clicks = pages, 0, [], 0
+        self.next_after_last = next_after_last
+        self.url = "https://www.naukri.com/x"
+
+    def goto(self, url, **_kw):
+        self.gotos.append(url)
+        self.index = 0                      # whatever page number is in the URL, page 1 is shown
+
+    def wait_for_timeout(self, _ms):
+        pass
+
+    def evaluate(self, _js):
+        return self.pages[self.index]
+
+    def locator(self, selector):
+        page = self
+
+        class Loc:
+            last = property(lambda self: self)
+
+            def count(self):
+                return 1 if selector in ("a[aria-label='Next']", "body") and (page.index + 1 < len(page.pages) or page.next_after_last) else 0
+
+            def is_visible(self):
+                return True
+
+            def get_attribute(self, _name):
+                return None
+
+            def click(self, **_kw):
+                page.clicks += 1
+                page.index = min(page.index + 1, len(page.pages) - 1)
+
+            def inner_text(self, **_kw):
+                return ""
+
+        return Loc()
+
+
+def naukri_rows(prefix, n):
+    return [{"title": f"Business Analyst {prefix}{i}", "company": "Co", "url": f"https://www.naukri.com/job-listings-{prefix}{i}",
+             "location": "Hyderabad", "experience": "3-5 Yrs", "posted": "1 day ago", "snippet": ""} for i in range(n)]
+
+
+def test_naukri_reaches_later_pages_by_clicking_next():
+    page = FakeNaukriPage([naukri_rows("a", 20), naukri_rows("b", 20), naukri_rows("c", 20)])
+    cards = nk.NaukriSource(page, "sort=f", today=lambda: TODAY).fetch_cards(Query("naukri", "Business Analyst", "Hyderabad", 7), 60, 5)
+    assert len(cards) == 60 and page.clicks == 2 and len(page.gotos) == 1
+
+
+def test_naukri_stops_when_there_is_no_next_button():
+    page = FakeNaukriPage([naukri_rows("a", 20), naukri_rows("b", 7)])
+    cards = nk.NaukriSource(page, "", today=lambda: TODAY).fetch_cards(Query("naukri", "Business Analyst", "Hyderabad", 7), 60, 5)
+    assert len(cards) == 27 and page.clicks == 1
+
+
+def test_naukri_stops_when_next_shows_nothing_new():
+    page = FakeNaukriPage([naukri_rows("a", 20), naukri_rows("a", 20)])          # next re-shows the same cards
+    cards = nk.NaukriSource(page, "", today=lambda: TODAY).fetch_cards(Query("naukri", "Business Analyst", "Hyderabad", 7), 60, 5)
+    assert len(cards) == 20
+
+
+# ---- role family in the pre-score ---------------------------------------------------------------
+
+def test_prescore_ranks_core_roles_above_engineering_titles_from_broad_variants():
+    cfg = config(use_variants=True)
+    core = prescore(card("Business Analyst", age=2), cfg, TODAY)
+    analytics = prescore(card("Sr. Consultant - Analytics", age=2), cfg, TODAY)
+    engineer = prescore(card("Data Engineer", age=2), cfg, TODAY)
+    tester = prescore(card("Automation Test Engineer", age=2), cfg, TODAY)
+    assert core > engineer and analytics > engineer and core > tester
+    assert 0 <= tester <= 100
+
+
+def test_prescore_still_never_drops_an_off_role_card(session):
+    cfg = config(use_variants=True)
+    assert prescore(card("Senior Software Engineer", age=6, exp_min=10, exp_max=12), cfg, TODAY) >= 0

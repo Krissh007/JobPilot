@@ -5,11 +5,26 @@ get the enrichment budget; it never drops one (the Scoring agent judges).
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from jobpilot.discovery.cards import Card
 from jobpilot.discovery.config import DiscoveryConfig
 from jobpilot.discovery.titles import _norm
+
+
+# Role family: the work you want vs. clearly different jobs that a broad variant title ("data analyst") also pulls in.
+CORE_ROLE = re.compile(r"business (?:system |systems |data )?analyst|product (?:analyst|owner|manager)|\bbsa\b|systems? analyst|"
+                       r"functional analyst|analytics|insights?", re.I)
+OTHER_ROLE = re.compile(r"developer|engineer|tester|architect|\bsap\b|sales|devops|scientist|administrator|support|"
+                        r"recruit|\bhr\b|mechanic|operator|technician|executive|associate for", re.I)
+
+
+def role_adjustment(title: str) -> float:
+    """+15 for a core BA/PA/PO/analytics title, -30 for an engineer/developer/sales-type title with none of those words."""
+    if CORE_ROLE.search(title):
+        return 15.0
+    return -30.0 if OTHER_ROLE.search(title) else 0.0
 
 
 def prescore(card: Card, config: DiscoveryConfig, today: date) -> float:
@@ -28,7 +43,7 @@ def prescore(card: Card, config: DiscoveryConfig, today: date) -> float:
             else:
                 overlap = len(set(t.split()) & words) / len(t.split())
                 best = max(best, rank * overlap * 0.6)
-    score = best
+    score = best + role_adjustment(card.title)
     if words & {"ai", "genai", "llm"}:
         score += 10
 
@@ -43,4 +58,4 @@ def prescore(card: Card, config: DiscoveryConfig, today: date) -> float:
         hi = card.exp_max if card.exp_max is not None else card.exp_min + 2
         score += 10 if card.exp_min <= config.exp_max and hi >= config.exp_min else 0
 
-    return round(min(score, 100.0), 1)
+    return round(max(min(score, 100.0), 0.0), 1)
