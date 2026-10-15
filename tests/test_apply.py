@@ -66,7 +66,7 @@ function show() {
   dlg.innerHTML = '<button aria-label="Dismiss" id="dismiss">x</button>' + steps[i];
   const n = dlg.querySelector('#next, #review');
   if (n) n.onclick = () => {
-    const empty = [...dlg.querySelectorAll('[required]')].filter(e => e.type === 'checkbox' ? !e.checked : !e.value);
+    const empty = [...dlg.querySelectorAll('[required]')].filter(e => e.type === 'checkbox' ? !e.checked : !e.value).concat([...dlg.querySelectorAll('fieldset[role=radiogroup]')].filter(f => !f.querySelector(':checked')).map(f => f.querySelector('input')));
     if (empty.length) { const a = document.createElement('div'); a.setAttribute('role','alert'); a.textContent = 'Please enter a valid answer'; empty[0].parentElement.appendChild(a); return; }
     i++; show();
   };
@@ -514,10 +514,10 @@ def test_stuck_required_dropdown_is_named_even_without_a_labelled_error(db_url, 
 
 # The Yes/No question on the real Aptita form: required only by the "*" in the question text, inputs carry no required flag.
 UNNAMED_RADIO = ('<div><div>Do you have exp in Go-to- Market Data Analyst?*</div>'
-                 '<div><fieldset role="radiogroup">'
+                 '<fieldset role="radiogroup">'
                  '<div><input type="radio" name="gtm" id="gtm1" aria-label="Do you have exp in Go-to- Market Data Analyst?"><label for="gtm1">Yes</label></div>'
                  '<div><input type="radio" name="gtm" id="gtm2" aria-label="Do you have exp in Go-to- Market Data Analyst?"><label for="gtm2">No</label></div>'
-                 '</fieldset></div></div>')
+                 '</fieldset></div>')
 
 
 def test_stuck_unflagged_radio_group_is_named_from_its_asterisk(db_url, world, chrome):

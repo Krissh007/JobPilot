@@ -51,6 +51,11 @@ UNANSWERED_REQUIRED_JS = r"""dialog => {
     const group = el.type === 'radio' || el.type === 'checkbox';
     const legend = el.closest('fieldset') ? el.closest('fieldset').querySelector('legend') : null;
     if (group && legend && first(legend.innerText)) return first(legend.innerText);
+    if (el.type === 'radio') {  // a radio's own <label> is an option ("Yes"); the question is its aria-label or the text around the group
+      if (first(el.getAttribute('aria-label'))) return first(el.getAttribute('aria-label'));
+      const set = el.closest('fieldset'); const top = set && set.parentElement ? first(set.parentElement.innerText).replace(/\s*\*\s*$/, '') : '';
+      if (top && top.length < 200) return top;
+    }
     if (el.labels && el.labels.length && first(el.labels[0].innerText)) return first(el.labels[0].innerText);
     if (first(el.getAttribute('aria-label'))) return first(el.getAttribute('aria-label'));
     if (first(byIds(el.getAttribute('aria-labelledby')))) return first(byIds(el.getAttribute('aria-labelledby')));
