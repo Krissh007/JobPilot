@@ -40,6 +40,49 @@ CONTINUE_BUTTON = re.compile(r"^\s*continue\s*$", re.IGNORECASE)
 DRAFT_NOTICE = re.compile(r"you last modified this application", re.IGNORECASE)
 
 
+# Finds required controls still empty on the current step and names each one. LinkedIn does not always raise an error
+# element with a label inside it, which left the old lookup with nothing to report ("a required field LinkedIn didn't name").
+UNANSWERED_REQUIRED_JS = r"""dialog => {
+  const first = t => String(t || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || '';
+  const visible = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const byIds = ids => String(ids || '').split(/\s+/).map(i => { const n = document.getElementById(i); return n ? n.innerText : ''; }).join(' ');
+  const nameOf = el => {
+    const group = el.type === 'radio' || el.type === 'checkbox';
+    const legend = el.closest('fieldset') ? el.closest('fieldset').querySelector('legend') : null;
+    if (group && legend && first(legend.innerText)) return first(legend.innerText);
+    if (el.labels && el.labels.length && first(el.labels[0].innerText)) return first(el.labels[0].innerText);
+    if (first(el.getAttribute('aria-label'))) return first(el.getAttribute('aria-label'));
+    if (first(byIds(el.getAttribute('aria-labelledby')))) return first(byIds(el.getAttribute('aria-labelledby')));
+    if (legend && first(legend.innerText)) return first(legend.innerText);
+    const wrap = el.closest('[data-test-form-element], .jobs-easy-apply-form-element, .fb-dash-form-element, .artdeco-text-input--container');
+    const near = wrap ? wrap.querySelector('label, legend, .fb-dash-form-element__label') : null;
+    if (near && first(near.innerText)) return first(near.innerText);
+    if (first(el.getAttribute('placeholder'))) return first(el.getAttribute('placeholder'));
+    let own = '';
+    if (el.parentElement) { const c = el.parentElement.cloneNode(true); c.querySelectorAll('select, input, textarea, button').forEach(n => n.remove()); own = first(c.textContent); }
+    if (own && own.length < 140) return own;
+    if (el.tagName === 'SELECT') {
+      const opts = [...el.options].map(o => first(o.innerText)).filter(o => o && !/^select/i.test(o)).slice(0, 4);
+      return 'an unlabelled dropdown' + (opts.length ? ' (' + opts.join(' / ') + ')' : '');
+    }
+    return 'an unlabelled ' + (el.tagName === 'TEXTAREA' ? 'text box' : (el.type || 'field') + ' field');
+  };
+  const empty = el => {
+    if (el.type === 'checkbox') return !el.checked;
+    if (el.type === 'radio') return ![...dialog.querySelectorAll('input[type=radio]')].filter(r => r.name === el.name).some(r => r.checked);
+    if (el.tagName === 'SELECT') return !el.value || /^select/i.test(first(el.options[el.selectedIndex] ? el.options[el.selectedIndex].innerText : ''));
+    return !String(el.value || '').trim();
+  };
+  const out = [];
+  for (const el of dialog.querySelectorAll('input, select, textarea')) {
+    if (['hidden', 'file', 'submit', 'button'].includes(el.type) || !visible(el)) continue;
+    const flagged = el.required || el.getAttribute('aria-required') === 'true' || el.getAttribute('aria-invalid') === 'true';
+    if (flagged && empty(el)) { const n = nameOf(el); if (n && !out.includes(n)) out.push(n); }
+  }
+  return out;
+}"""
+
+
 def easy_apply_module():
     return bridge.easy_apply()
 
@@ -62,6 +105,20 @@ def make_filler_class():
                 if DRAFT_NOTICE.search(self._body_text()):
                     return super()._button(scope, CONTINUE_BUTTON)   # resume the draft saved earlier
             return found
+
+        @classmethod
+        def _error_questions(cls, dialog: Any) -> list[str]:
+            """LinkedIn's flagged errors, plus any required control still empty, each by name."""
+            names: list[str] = []
+            try:
+                names = list(super()._error_questions(dialog))
+            except Exception:
+                pass
+            try:
+                names += [cls._clean(n) for n in dialog.evaluate(UNANSWERED_REQUIRED_JS)]
+            except Exception:
+                pass
+            return [n for i, n in enumerate(names) if n and n not in names[:i]]
 
         def _note_consent(self, question: str) -> None:
             if question and question not in self.consent:

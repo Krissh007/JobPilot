@@ -495,3 +495,18 @@ def test_stuck_form_parks_again_after_resuming_a_draft(db_url, world, chrome):
     runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
     _, app, _, _ = state(db_url, world)
     assert app.reason == "draft_saved" and holder["save"] == 1 and holder["discard"] == 0
+
+
+# ---- naming a required field LinkedIn gave no labelled error for -----------------------------
+
+UNNAMED = ('<div><span id="q9">Do you hold a CSPO or SAFe certification?</span>'
+           '<select id="cert" required aria-labelledby="q9"><option value="">Select an option</option>'
+           '<option>Yes</option><option>No</option></select></div>')
+
+
+def test_stuck_required_dropdown_is_named_even_without_a_labelled_error(db_url, world, chrome):
+    make, holder = factory(chrome, extra=UNNAMED)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(), drafter_factory=lambda job: (lambda q, options=None: None))
+    _, app, _, run = state(db_url, world)
+    assert app.reason == "draft_saved"
+    assert "CSPO or SAFe" in run.log and "didn't name" not in run.log
