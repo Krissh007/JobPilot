@@ -76,7 +76,7 @@ async def test_every_tool_against_the_real_api(db_url, monkeypatch):
         assert [j["title"] for j in shortlist["data"]["jobs"]] == ["ML Engineer", "Data Analyst", "BA Lead"]
 
         queue = await call(client, "get_review_queue")
-        assert queue["data"]["count"] == 3 and "ML Engineer at Co2" in queue["say"]
+        assert queue["data"]["count"] == 3 and "ML Engineer at Co2" in queue["say"] and all(f"application {a['application_id']}," in queue["say"] for a in queue["data"]["applications"])
 
         approved = await call(client, "approve_application", {"application_id": ids[0]})
         assert approved["ok"] and approved["data"]["state"] == "approved"

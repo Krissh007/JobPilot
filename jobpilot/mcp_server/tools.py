@@ -104,7 +104,8 @@ def register(mcp: MCPServer, api: ApiClient) -> None:
                  "reason": a.get("reason", "")} for a in apps if not a.get("is_example")]
         if not rows:
             return _ok("Nothing is waiting for approval.", {"count": 0, "applications": []})
-        say = f"{_plural(len(rows), 'application')} waiting for approval: {_names(rows)}."
+        spoken = "; ".join(f"application {r['application_id']}, {_describe_job(r)}" for r in rows[:SPOKEN])
+        say = f"{_plural(len(rows), 'application')} waiting for approval: {spoken}."
         return _ok(say, {"count": len(rows), "applications": rows})
 
     @mcp.tool(annotations=READ)

@@ -149,7 +149,7 @@ async def test_review_queue_lists_pending_and_hides_examples():
     async with client:
         r = await call(client, "get_review_queue")
     assert fake.query() == [("state", "pending_review")]
-    assert r["say"] == "1 application waiting for approval: ML Engineer at Acme."
+    assert r["say"] == "1 application waiting for approval: application 7, ML Engineer at Acme."
     assert r["data"]["applications"][0]["application_id"] == 7 and r["data"]["applications"][0]["needs_review"] == 2
 
 
