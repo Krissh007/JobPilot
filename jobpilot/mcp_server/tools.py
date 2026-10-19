@@ -17,7 +17,7 @@ SPOKEN = 3          # how many items a spoken reply names
 
 READ = ToolAnnotations(readOnlyHint=True)
 ACTION = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
-RUN_KEYS = ("id", "agent", "status", "started_at", "finished_at", "error")
+RUN_KEYS = ("id", "agent", "status", "started_at", "finished_at", "error", "found", "processed")
 
 
 def _ok(say: str, data: Any = None) -> dict:
