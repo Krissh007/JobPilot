@@ -14,8 +14,8 @@ class DiscoveryConfig(BaseModel):
     locations: list[str] = Field(default_factory=lambda: ["Hyderabad"])
     sources: list[str] = Field(default_factory=lambda: ["naukri", "linkedin"])
     max_posted_days: int = Field(7, ge=1, le=60)
-    max_cards_per_query: int = Field(60, ge=1)
-    max_pages_per_query: int = Field(5, ge=1)
+    max_cards_per_query: int = Field(120, ge=1)
+    max_pages_per_query: int = Field(6, ge=1)
     enrich_per_query: int = Field(15, ge=0)   # the enrichment budget: full-description page loads per query
     backlog_budget: int = Field(100, ge=0)    # description page loads per run for leftover unenriched `found` jobs
     exp_min: int = 3                          # pre-score preference only; the hard gate belongs to the Scoring agent

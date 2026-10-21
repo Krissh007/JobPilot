@@ -269,7 +269,9 @@ def test_naukri_url_and_card_mapping():
 # ---- agent entry point -----------------------------------------------------------
 
 def test_agent_run_records_run_and_saves_found(db_url):
-    src = FakeSource("linkedin", {"Business Analyst": [card(url="https://www.linkedin.com/jobs/view/4000000050")]})
+    fresh = card(url="https://www.linkedin.com/jobs/view/4000000050")
+    fresh.posted_on = date.today() - timedelta(days=1)   # discover.run uses the real date, so don't tie this to TODAY
+    src = FakeSource("linkedin", {"Business Analyst": [fresh]})
     discover.run({"keywords": ["Business Analyst"], "use_variants": False, "sources": ["linkedin"]},
                  db_url=db_url, sources={"linkedin": src})
     with Session(get_engine(db_url)) as s:
