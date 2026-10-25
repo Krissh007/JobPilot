@@ -20,6 +20,21 @@ powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\run_api.ps1     # t
 - Search, scoring and documents run by themselves (see *Scheduling*). You look at **Review** when a toast
   says an application is waiting, answer new **open questions** on the Answers tab (a reminder comes every
   Monday 09:00), and follow progress on **Board**, **Jobs** and **Analytics**.
+- The API also starts by itself at sign-in (Windows task `JobPilot API`, log in `data\logs\api.log`).
+
+### Dashboard and links
+
+| What | Where |
+|---|---|
+| Dashboard | http://127.0.0.1:8000 (this PC only) |
+| API docs (interactive) | http://127.0.0.1:8000/docs |
+| MCP server for JARVIS / Agent Hub | http://127.0.0.1:8766/mcp (bearer token `JOBPILOT_MCP_TOKEN`) |
+| Database | `E:\JobPilot\data\jobpilot.db` |
+| Tailored resumes and cover letters | `E:\JobPilot\output\<Company>_<id>\` |
+| Logs | `E:\JobPilot\data\logs\` (`api.log`, `scheduled.log`, `run_<id>.log`) |
+| Design | [`docs/DESIGN.md`](docs/DESIGN.md) |
+| Build history | [`PROGRESS.md`](PROGRESS.md) |
+| PMO tracking | `E:\Claude_Projects_Setup\05_PMO_Dashboard` (portfolio), `01_JP_Job_Search` and `02_JP_Auto_Apply` (this repo's two halves) |
 
 ## First-time setup (Windows, PowerShell)
 
@@ -43,8 +58,8 @@ cd ..
 
 # Sign in once per portal in the agent's own browser profile (you type the password or OTP; JobPilot never sees it):
 cd E:\JobPilot
-python -m jobpilot.agents.apply.login linkedin
-python -m jobpilot.agents.apply.login naukri
+.\.venv\Scripts\python -m jobpilot.agents.apply.login linkedin
+.\.venv\Scripts\python -m jobpilot.agents.apply.login naukri
 
 powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1   # or Settings -> Schedule -> Register
 ```
@@ -122,7 +137,7 @@ JobPilot adds one more check:
 
 Anything the JD asks for that your resume doesn't show is listed in the report and never added.
 
-Your resume is `RESUME_PATH` in `.env`; scoring uses the same file. When you save a new version, point `RESUME_PATH` at it. The new content gets a new version hash, so documents and scores are regenerated instead of coming from the cache. Contact details come from the legacy `config\application_profile.yaml`. Review every document before you upload it.
+Your resume is `RESUME_PATH` in `.env`; scoring uses the same file. When you save a new version, point `RESUME_PATH` at it. The new content gets a new version hash, so documents and scores are regenerated instead of coming from the cache. Contact details come from `config\application_profile.yaml` (personal, git-ignored). Review every document before you upload it.
 
 ## API (backend for the dashboard)
 
@@ -210,21 +225,34 @@ powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1 
 
 | Task | When (from Settings) | Runs |
 |---|---|---|
-| `JobPilot Search-Score-Docs` | daily 08:00, every 4 h until 22:00 IST | `pythonw -m jobpilot.scheduled --log`: search → score → docs, each recorded in Agent runs; log in `data\logs\scheduled.log` |
+| `JobPilot Search-Score-Docs` | on the chosen days: every N hours in a window (default 08:00–22:00) or at exact times | `pythonw -m jobpilot.scheduled --log`: discovery → scoring → documents, each recorded in Runs; log in `data\logs\scheduled.log` |
 | `JobPilot Weekly-Answer-Review` | Monday 09:00 IST | `pythonw -m jobpilot.weekly`: toast if the answer review is due |
-| `JobPilot Catch-up` | 2 min after sign-in, unlock or wake from sleep | `pythonw -m jobpilot.scheduled --catch-up`: a full pass only if the last search is overdue (one interval minus 30 min) and it is inside the window |
+| `JobPilot Catch-up` | 2 min after sign-in, unlock or wake from sleep | `pythonw -m jobpilot.scheduled --catch-up`: a full pass only if one is overdue and it is a run day, inside the window |
+| `JobPilot API` | at sign-in | starts the API + dashboard on :8000 (not created by `register_tasks.ps1`) |
 
-The tasks run only while you are logged on (search uses your signed-in browser profile), start a missed run when the PC is next available, never overlap (a lock file plus *ignore new instance*), stop after 2 h, and need no admin rights. Windows doesn't reliably start missed runs after sleep or modern
+The tasks run only while you are logged on, start a missed run when the PC is next available, never overlap (a lock file plus *ignore new instance*), stop after 2 h, and need no admin rights. Windows doesn't reliably start missed runs after sleep or modern
 standby, hence the catch-up task; a run Windows starts more than 30 min after the window closes skips itself. **Apply is never scheduled**: it opens a browser and waits for you. After changing the times in Settings, click **Update tasks**.
+
+## MCP server (JARVIS via Agent Hub)
+
+```powershell
+.\.venv\Scripts\python -m jobpilot.mcp_server      # http://127.0.0.1:8766/mcp; needs JOBPILOT_MCP_TOKEN in .env (16+ characters)
+```
+
+Registered in Agent Hub as `jobpilot` (`E:\agent-hub\config\agents.yaml`). It has no database access; every tool
+calls the REST API above, so the same guards apply. Tools: `get_jobs`, `get_shortlist`, `get_review_queue`,
+`get_run_logs` (read) and `run_agent`, `approve_application`, `skip_application` (actions). Apply started from
+JARVIS is always review-only. Each tool returns `{ok, say, data}`, where `say` is short enough to speak.
 
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python -m pytest            # 106 tests, about 2.5 min
+.\.venv\Scripts\python -m pytest            # 225 tests
 .\.venv\Scripts\python -m pytest tests\test_ui_smoke.py   # dashboard end to end (needs `npm run build` first)
 ```
 
-- Database, dedupe, import, scorer, docs and API tests use a fresh database built by the real migrations; Gemini is faked.
+- Database, discovery, scoring, documents, scheduler, MCP and API tests use a fresh database built by the real
+  migrations; Gemini and Task Scheduler are faked. `test_self_contained` proves nothing imports the old project.
 - The apply tests run the real fillers against fake LinkedIn and Naukri pages in headless Chrome, and
   prove nothing is submitted without permission (Submit/Apply clicks are counted).
 - The UI smoke test serves `web\dist` from the real API on a temporary seeded database and clicks through every

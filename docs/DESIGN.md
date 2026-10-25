@@ -251,6 +251,7 @@ to answer them, which is what lets more applications become trusted over time.
 | Scheduled task **Search-Score-Docs** | Discovery -> Scoring -> Documents. On the chosen days, either every N hours in a window (default 08:00-22:00, every 4 h) or at explicit times |
 | Scheduled task **Catch-up** | 2 min after sign-in, unlock or wake: the same pass, only if one is overdue (Windows misses runs during sleep) |
 | Scheduled task **Weekly-Answer-Review** | Monday 09:00: toast if open questions are waiting |
+| Scheduled task **JobPilot API** | at sign-in: starts the API and dashboard on :8000 (log `data\logs\api.log`) |
 | Dashboard **Run now** (`POST /api/runs/pipeline`) | all four agents in order; Apply review-only |
 | Dashboard per-agent Run now, CLI | one agent |
 | JARVIS via MCP `run_agent` | one agent or the pipeline; Apply forced review-only |
