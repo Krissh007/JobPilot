@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, STAGES, STAGE_COLOR, STAGE_LABEL, type Stage } from "../api";
-import { useApplications, useMeta } from "../data";
+import { useApplications, useMeta, useSettings } from "../data";
 import { TABS, useUI, type SourceFilter, type Theme } from "../state";
 import { Button, Kbd, Segmented, StageDot, cx } from "../ui";
 
 export function Header() {
   const { data: meta, isError } = useMeta();
+  const { data: settings } = useSettings();  // the subtitle shows the live search filters
   const { openJob, setTab, theme, setTheme, toast } = useUI();
   const qc = useQueryClient();
   const search = useMutation({
@@ -22,7 +23,12 @@ export function Header() {
       <div className="mr-auto flex min-w-0 items-center gap-3">
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-accent font-mono text-[11px] font-bold text-accent-ink">JP</span>
         <h1 className="font-display text-[19px] font-bold tracking-tight">Job<span className="text-accent">Pilot</span></h1>
-        <small className="hidden truncate border-l border-line-2 pl-3 text-muted md:block">AI BA · AI Product Analyst · Hyderabad · 2–4 yrs</small>
+        {settings && (
+          <small className="hidden truncate border-l border-line-2 pl-3 text-muted md:block">
+            {[settings.discovery.keywords.slice(0, 2).join(" · "), settings.discovery.locations.join(", "),
+              `${settings.scoring.exp_min}–${settings.scoring.exp_max} yrs`].filter(Boolean).join(" · ")}
+          </small>
+        )}
       </div>
       <span className="hidden items-center gap-1.5 text-[12px] text-muted sm:flex">
         <i className={cx("h-1.5 w-1.5 rounded-full", isError ? "bg-bad" : "bg-good")} />
