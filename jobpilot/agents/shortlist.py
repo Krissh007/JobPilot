@@ -164,7 +164,7 @@ def select_jobs(session: Session, limit: int, job_id: int | None, job_ids: list[
         select(Job)
         .where(Job.status == JobStatus.found, Job.score.is_(None), Job.is_example.is_(False),
                func.length(Job.jd_text) >= MIN_JD_CHARS)
-        .order_by(Job.found_at.desc())).all()
+        .order_by(Job.found_at.desc(), Job.id.desc())).all()  # id breaks ties: jobs saved in the same instant
     # Title relevance first (core BA/PA/PO titles, then neutral, then engineer/sales-type), newest first within a rank.
     # sorted() is stable, so the newest-first order above survives inside each rank.
     return sorted(waiting, key=lambda job: -role_adjustment(job.title))[:limit]
