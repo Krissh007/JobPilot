@@ -226,6 +226,28 @@ def test_review_mode_never_submits_without_approval(db_url, world, chrome):
     assert "auto-submit is off" in run.log
 
 
+def test_review_only_run_never_submits_even_with_auto_submit_on(db_url, world, chrome):  # JPA-TC-005 (LinkedIn)
+    set_auto(db_url, True)
+    make, holder = factory(chrome)
+    seen = {}
+    pacing = FakePacing(db_url, decide=ApplicationState.skipped)
+    original = runner.wait_for_decision
+
+    def spy(session, app, page, *args, **kwargs):
+        seen["submits_while_waiting"] = page.evaluate("window.__submits")
+        return original(session, app, page, *args, **kwargs)
+
+    runner.wait_for_decision = spy
+    try:
+        runner.run(review_only=True, db_url=db_url, browser_factory=make, pacing=pacing, drafter_factory=lambda job: None)
+    finally:
+        runner.wait_for_decision = original
+    job, app, _, run = state(db_url, world)
+    assert seen["submits_while_waiting"] == 0
+    assert app.state == ApplicationState.skipped and job.status == JobStatus.docs_ready
+    assert "AUTO-SUBMITTED" not in run.log and "Auto-submit OFF (review-only run)" in run.log
+
+
 def hold_window_open(db_url):
     with Session(get_engine(db_url)) as s:
         put_setting(s, "park_incomplete", False)

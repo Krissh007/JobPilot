@@ -1,11 +1,12 @@
 """
-The pipeline Windows Task Scheduler runs: discovery -> scoring -> documents. `--now` (the dashboard's Run now) adds apply.
+The pipeline Windows Task Scheduler runs: discovery -> scoring -> documents. `--now` (Run now) adds apply, which stops at review unless `--auto-submit` is given.
 
 The scheduled pass runs discovery, scoring and documents. When it runs is the `schedule` setting: a start/end window
 repeated every N hours, or an explicit list of run times, on the chosen days of the week.
 
     python -m jobpilot.scheduled                  # one pass now, any time
     python -m jobpilot.scheduled --now            # Run now: discovery, scoring, documents, then apply (review only)
+    python -m jobpilot.scheduled --now --auto-submit   # same, but apply submits clean forms if the auto_submit setting is ON
     python -m jobpilot.scheduled --log            # what the task runs: logs to a file, skips late runs
     python -m jobpilot.scheduled --catch-up       # on sign-in/unlock/wake: a pass only if one is overdue
     python -m jobpilot.scheduled --print-config   # JSON used by scripts/register_tasks.ps1
@@ -126,13 +127,14 @@ def default_steps() -> list[tuple[str, Callable[[], None]]]:
     return [("discovery", discover.run), ("scoring", shortlist.run), ("documents", documents.run)]
 
 
-def run_now_steps() -> list[tuple[str, Callable[[], None]]]:
-    """ The four agents in order. Apply only fills forms and waits for you in Review; it never submits from here."""
+def run_now_steps(review_only: bool = True) -> list[tuple[str, Callable[[], None]]]:
+    """ The four agents in order. Apply fills forms and waits for you in Review. It submits only when review_only is False
+    (an explicit --auto-submit) and the auto_submit setting is ON."""
     from jobpilot.agents import discover, documents, shortlist
     from jobpilot.agents.apply import runner
 
     return [("discovery", discover.run), ("scoring", shortlist.run), ("documents", documents.run),
-            ("apply", lambda: runner.run(review_only=True))]
+            ("apply", lambda: runner.run(review_only=review_only))]
 
 
 def run_pipeline(steps: list[tuple[str, Callable[[], None]]] | None = None, lock: Path = LOCK) -> int:
@@ -206,16 +208,24 @@ def catch_up_due(now: datetime, cfg: dict, last_started: datetime | None) -> boo
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--now", action="store_true", help="Run all four agents once, now (what Run now does)")
+    parser.add_argument("--review-only", action="store_true", help="With --now: apply never submits (the default for --now)")
+    parser.add_argument("--auto-submit", action="store_true",
+                        help="With --now: apply submits clean forms if the auto_submit setting is ON; --review-only wins")
     parser.add_argument("--print-config", action="store_true", help="Print the schedule settings as JSON and exit")
     parser.add_argument("--log", action="store_true", help=f"Append output to {LOG} (used by the scheduled task)")
     parser.add_argument("--catch-up", action="store_true",
                         help="Run a pass only if one is overdue (used by the sign-in/unlock/wake task)")
     args = parser.parse_args(argv)
+    if (args.review_only or args.auto_submit) and not args.now:
+        parser.error("--review-only and --auto-submit only apply with --now")
     if args.print_config:
         print(json.dumps(config()))
         return
     if args.now:
-        sys.exit(run_pipeline(run_now_steps()))
+        review_only = args.review_only or not args.auto_submit
+        print("Apply: " + ("review-only (nothing is submitted)" if review_only
+                           else "auto-submit requested; it submits only if the auto_submit setting is ON"), flush=True)
+        sys.exit(run_pipeline(run_now_steps(review_only)))
     if args.catch_up:
         cfg = config()
         now = datetime.now().astimezone()

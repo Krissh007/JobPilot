@@ -24,6 +24,7 @@ from sqlmodel import Session, select
 from jobpilot.api.deps import get_or_404, get_session
 from jobpilot.config import ROOT
 from jobpilot.db.models import AgentName, AgentRun, RunStatus, utcnow
+from jobpilot.db.repo import get_setting
 from jobpilot.db.session import get_engine
 
 router = APIRouter(tags=["runs"])
@@ -41,13 +42,31 @@ class RunOptions(BaseModel):
     """Whitelisted options only; nothing from the request reaches a shell."""
     limit: Optional[int] = Field(None, ge=1, le=500)  # scoring, documents, apply
     job_id: Optional[int] = Field(None, ge=1)          # scoring, documents, apply
-    review_only: bool = False                          # apply: never auto-submit this run
+    auto_submit: bool = False                          # apply: submit clean forms, but only if the auto_submit setting is ON too
+    review_only: bool = False                          # apply: veto; wins over auto_submit (older callers)
 
 
-def build_command(agent: AgentName, run_id: int, options: RunOptions) -> list[str]:
+class PipelineOptions(BaseModel):
+    auto_submit: bool = False                          # same meaning as RunOptions.auto_submit, for the apply step
+
+
+def submits(requested: bool, vetoed: bool, session: Session) -> bool:
+    """A run submits only when the caller asked for it AND the auto_submit setting is ON. Anything else is review-only."""
+    return requested and not vetoed and bool(get_setting(session, "auto_submit"))
+
+
+def mode_line(requested: bool, setting_on: bool, effective: bool) -> str:
+    if effective:
+        return "Auto-submit ON (requested in the run request, and on in Settings)"
+    if requested and not setting_on:
+        return "Review-only (auto-submit was requested but is OFF in Settings)"
+    return "Review-only (no auto-submit requested)"
+
+
+def build_command(agent: AgentName, run_id: int, options: RunOptions, auto_submit: bool = False) -> list[str]:
     command = [sys.executable, "-m", f"jobpilot.agents.{MODULES[agent]}", "--run-id", str(run_id)]
     if agent == AgentName.apply:
-        command += (["--job-id", str(options.job_id)] if options.job_id else []) + ["--review-only"] * options.review_only
+        command += (["--job-id", str(options.job_id)] if options.job_id else []) + ["--review-only"] * (not auto_submit)
         command += ["--limit", str(options.limit)] if options.limit else []
     elif agent in (AgentName.scoring, AgentName.documents):
         if options.limit:
@@ -98,8 +117,10 @@ def get_run(run_id: int, request: Request, session: Session = Depends(get_sessio
 
 
 @router.post("/runs/pipeline", status_code=202)
-def run_now(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
-    """ Run now: Discovery, Scoring, Documents, then Apply (review only: nothing is submitted), one after another.
+def run_now(request: Request, options: PipelineOptions = PipelineOptions(),
+            session: Session = Depends(get_session)) -> dict[str, Any]:
+    """ Run now: Discovery, Scoring, Documents, then Apply, one after another. Apply stops at review unless the body
+    says {"auto_submit": true} AND the auto_submit setting is ON; then clean forms are submitted and the rest wait in Review.
     Each agent records its own agent_runs row, so the Runs screen shows them as they start."""
     reap(request, session)
     busy = session.exec(select(AgentRun).where(AgentRun.agent.in_(list(RUNNABLE)), AgentRun.status == RunStatus.running,
@@ -111,10 +132,13 @@ def run_now(request: Request, session: Session = Depends(get_session)) -> dict[s
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
     if request.app.state.db_url:
         env["DATABASE_URL"] = request.app.state.db_url
+    effective = submits(options.auto_submit, False, session)
+    command = [sys.executable, "-m", "jobpilot.scheduled", "--now", "--auto-submit" if effective else "--review-only"]
     with open(LOG_DIR / "run_now.log", "w", encoding="utf-8") as console:
-        subprocess.Popen([sys.executable, "-m", "jobpilot.scheduled", "--now"], cwd=ROOT, env=env, stdout=console,
-                         stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"started": [a.value for a in MODULES], "log": "data/logs/run_now.log"}
+        subprocess.Popen(command, cwd=ROOT, env=env, stdout=console, stderr=subprocess.STDOUT,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"started": [a.value for a in MODULES], "log": "data/logs/run_now.log", "auto_submit": effective,
+            "mode": mode_line(options.auto_submit, bool(get_setting(session, "auto_submit")), effective)}
 
 
 @router.post("/runs/{agent}", status_code=202)
@@ -131,7 +155,10 @@ def start_run(agent: AgentName, request: Request, options: RunOptions = RunOptio
     if live:
         raise HTTPException(409, {"message": f"A {agent.value} run is already in progress", "run_id": live[0].id})
 
-    run = AgentRun(agent=agent, status=RunStatus.running, log="Starting...")
+    effective = agent == AgentName.apply and submits(options.auto_submit, options.review_only, session)
+    mode = (mode_line(options.auto_submit and not options.review_only, bool(get_setting(session, "auto_submit")), effective)
+            if agent == AgentName.apply else None)
+    run = AgentRun(agent=agent, status=RunStatus.running, log=f"Starting... {mode}" if mode else "Starting...")
     session.add(run)
     session.commit()
 
@@ -141,11 +168,11 @@ def start_run(agent: AgentName, request: Request, options: RunOptions = RunOptio
         env["DATABASE_URL"] = request.app.state.db_url
     with open(LOG_DIR / f"run_{run.id}.log", "w", encoding="utf-8") as console:
         process = subprocess.Popen(
-            build_command(agent, run.id, options), cwd=ROOT, env=env, stdout=console, stderr=subprocess.STDOUT,
+            build_command(agent, run.id, options, effective), cwd=ROOT, env=env, stdout=console, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     request.app.state.processes[run.id] = process
-    return serialize(run)
+    return {**serialize(run), "auto_submit": effective}
 
 
 def _aware(value):

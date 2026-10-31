@@ -206,19 +206,36 @@ async def test_run_agent_starts_plain_agents_with_no_options(agent):
     assert fake.last.content in (b"", b"null")
 
 
-async def test_run_agent_apply_is_always_review_only():
-    fake, client = make({("POST", "/api/runs/apply"): (202, {"id": 13})})
+async def test_run_agent_apply_defaults_to_review_only():
+    fake, client = make({("POST", "/api/runs/apply"): (202, {"id": 13, "auto_submit": False})})
     async with client:
         r = await call(client, "run_agent", {"agent": "apply"})
-    assert json.loads(fake.last.content) == {"review_only": True}
-    assert "stop at review" in r["say"]
+    assert json.loads(fake.last.content) == {"auto_submit": False}
+    assert "stops at review" in r["say"] and r["data"]["auto_submit"] is False
 
 
-async def test_run_agent_pipeline():
-    fake, client = make({("POST", "/api/runs/pipeline"): (202, {"started": ["discovery"], "log": "x"})})
+async def test_run_agent_pipeline():  # JPA-TC-001: no auto_submit argument means a review-only run
+    fake, client = make({("POST", "/api/runs/pipeline"): (202, {"started": ["discovery"], "log": "x", "auto_submit": False})})
     async with client:
         r = await call(client, "run_agent", {"agent": "pipeline"})
-    assert fake.last.url.path == "/api/runs/pipeline" and r["ok"] and "pipeline started" in r["say"]
+    assert fake.last.url.path == "/api/runs/pipeline" and json.loads(fake.last.content) == {"auto_submit": False}
+    assert r["ok"] and "pipeline started" in r["say"] and "stops at review" in r["say"] and "submitted" not in r["say"]
+
+
+async def test_run_agent_pipeline_auto_submit_is_passed_through():  # JPA-TC-002
+    fake, client = make({("POST", "/api/runs/pipeline"): (202, {"started": ["discovery"], "log": "x", "auto_submit": True})})
+    async with client:
+        r = await call(client, "run_agent", {"agent": "pipeline", "auto_submit": True})
+    assert json.loads(fake.last.content) == {"auto_submit": True}
+    assert r["ok"] and "will be submitted" in r["say"] and r["data"]["auto_submit"] is True
+
+
+async def test_run_agent_says_so_when_the_settings_switch_overrode_the_request():
+    fake, client = make({("POST", "/api/runs/pipeline"): (202, {"started": ["discovery"], "log": "x", "auto_submit": False})})
+    async with client:
+        r = await call(client, "run_agent", {"agent": "pipeline", "auto_submit": True})
+    assert json.loads(fake.last.content) == {"auto_submit": True}
+    assert "off in Settings" in r["say"] and "will be submitted" not in r["say"]
 
 
 async def test_run_agent_unknown_agent_never_reaches_the_api():

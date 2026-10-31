@@ -138,20 +138,35 @@ def register(mcp: MCPServer, api: ApiClient) -> None:
         return _ok(say, {"runs": rows})
 
     @mcp.tool(annotations=ACTION)
-    async def run_agent(agent: Literal["discovery", "scoring", "documents", "apply", "pipeline"]) -> dict:
-        """Start a JobPilot agent: discovery, scoring, documents, apply, or the whole pipeline. Apply only
-        fills forms for review and never submits. Needs confirmation."""
+    async def run_agent(agent: Literal["discovery", "scoring", "documents", "apply", "pipeline"],
+                        auto_submit: bool = False) -> dict:
+        """Start a JobPilot agent: discovery, scoring, documents, apply, or the whole pipeline. By default apply only
+        fills forms and stops at review; nothing is submitted. Set auto_submit true only when the user has explicitly
+        asked to submit applications; clean applications are then submitted, and only if auto-submit is also ON in
+        JobPilot's Settings. Needs confirmation."""
         if agent not in RUN_AGENTS:
             return _fail(f"I can run discovery, scoring, documents, apply or the pipeline, not {agent}.")
+        applies = agent in ("apply", "pipeline")
         try:
-            if agent == "pipeline":
-                await api.post("/runs/pipeline")
-                return _ok("The full pipeline started. Apply stops at review.", {"agent": agent})
-            run = await api.post(f"/runs/{agent}", {"review_only": True} if agent == "apply" else None)
+            run = await api.post(f"/runs/{agent}", {"auto_submit": auto_submit} if applies else None)
         except ApiError as e:
             return _fail(e.say)
-        say = f"{agent.capitalize()} started." + (" It will stop at review." if agent == "apply" else "")
-        return _ok(say, {"agent": agent, "run_id": run.get("id")})
+        run = run if isinstance(run, dict) else {}
+        # The server decides: it submits only if asked AND the Settings switch is on. Say what it actually did.
+        submits = bool(run.get("auto_submit"))
+        tail = ""
+        if applies:
+            if submits:
+                tail = " Clean applications will be submitted; anything else waits for your review."
+            elif auto_submit:
+                tail = " Auto-submit is off in Settings, so it stops at review."
+            else:
+                tail = " It stops at review."
+        say = ("The full pipeline started." if agent == "pipeline" else f"{agent.capitalize()} started.") + tail
+        data = {"agent": agent, "auto_submit": submits}
+        if agent != "pipeline":
+            data["run_id"] = run.get("id")
+        return _ok(say, data)
 
     async def decide(application_id: int, verb: str, past: str) -> dict:
         if application_id < 1:

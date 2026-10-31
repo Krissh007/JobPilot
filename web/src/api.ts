@@ -139,7 +139,8 @@ export const api = {
   markSubmitted: (id: number) => request<Application>(`/applications/${id}/mark-submitted`, { method: "POST" }),
   runs: (limit = 50) => request<Run[]>(`/runs?limit=${limit}`),
   run: (id: number) => request<Run>(`/runs/${id}`),
-  runNow: () => request<{ started: AgentName[]; log: string }>("/runs/pipeline", { method: "POST" }),
+  // auto_submit is the Settings switch; the server also checks it, and anything not explicitly true is review-only
+  runNow: (autoSubmit = false) => request<{ started: AgentName[]; log: string; auto_submit: boolean; mode: string }>("/runs/pipeline", { method: "POST", ...json({ auto_submit: autoSubmit }) }),
   startRun: (agent: AgentName, options: Record<string, unknown> = {}) => request<Run>(`/runs/${agent}`, { method: "POST", ...json(options) }),
   answers: () => request<Answer[]>("/answers"),
   createAnswer: (body: Pick<Answer, "question" | "answer" | "tags">) => request<Answer>("/answers", { method: "POST", ...json(body) }),

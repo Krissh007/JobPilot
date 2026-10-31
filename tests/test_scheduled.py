@@ -242,5 +242,35 @@ def test_settings_api_rejects_bad_values(client, payload):
     assert client.get("/api/settings").json()["schedule"]["days"] == scheduled.ALL_DAYS     # nothing was half-saved
 
 
-def test_run_now_runs_the_four_agents_in_order_with_apply_review_only():
-    assert [name for name, _ in scheduled.run_now_steps()] == ["discovery", "scoring", "documents", "apply"]
+def apply_review_only_flag(monkeypatch, steps) -> bool:
+    """Run only the apply step with runner.run replaced by a spy; returns the review_only it was called with."""
+    from jobpilot.agents.apply import runner
+    seen = []
+    monkeypatch.setattr(runner, "run", lambda **kwargs: seen.append(kwargs["review_only"]))
+    dict(steps)["apply"]()
+    return seen[0]
+
+
+def test_run_now_runs_the_four_agents_in_order_with_apply_review_only(monkeypatch):  # JPA-TC-006
+    steps = scheduled.run_now_steps()
+    assert [name for name, _ in steps] == ["discovery", "scoring", "documents", "apply"]
+    assert apply_review_only_flag(monkeypatch, steps) is True                       # review-only by default
+    assert apply_review_only_flag(monkeypatch, scheduled.run_now_steps(review_only=False)) is False
+
+
+@pytest.mark.parametrize("argv, review_only", [(["--now"], True), (["--now", "--review-only"], True),
+                                               (["--now", "--auto-submit"], False),
+                                               (["--now", "--auto-submit", "--review-only"], True)])
+def test_now_is_review_only_unless_auto_submit_is_explicit(monkeypatch, argv, review_only):
+    asked = []
+    monkeypatch.setattr(scheduled, "run_now_steps", lambda review_only=True: asked.append(review_only) or [])
+    monkeypatch.setattr(scheduled, "run_pipeline", lambda steps=None, lock=None: 0)
+    with pytest.raises(SystemExit):
+        scheduled.main(argv)
+    assert asked == [review_only]
+
+
+def test_auto_submit_flag_needs_now(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        scheduled.main(["--auto-submit"])
+    assert exit_info.value.code == 2

@@ -553,7 +553,8 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
         if job_id is not None and supersede_parked(session, job_id):
             rec.log(f"#{job_id}: the earlier saved application is replaced by this run (it picks up where LinkedIn's saved draft left off)")
         jobs = select_jobs(session, job_id, threshold)
-        rec.log(f"Auto-submit {'ON' if auto_submit else 'OFF'} · threshold {threshold:g} · today {cap - budget}/{cap} applied · "
+        mode = "ON" if auto_submit else "OFF (review-only run)" if review_only else "OFF (setting is off)"
+        rec.log(f"Auto-submit {mode} · threshold {threshold:g} · today {cap - budget}/{cap} applied · "
                 f"{len(jobs)} job(s) queued" + (f" · stop after {limit} filled form(s)" if limit else "")
                 + (" · stuck forms are parked for you" if park_incomplete else ""))
         filled = 0

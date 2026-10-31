@@ -11,8 +11,8 @@ export function Header() {
   const { openJob, setTab, theme, setTheme, toast } = useUI();
   const qc = useQueryClient();
   const search = useMutation({
-    mutationFn: () => api.runNow(),
-    onSuccess: () => { toast("Run now started: Discovery, Scoring, Documents, then Apply (review only). Follow it in Runs."); setTab("runs"); qc.invalidateQueries({ queryKey: ["runs"] }); },
+    mutationFn: () => api.runNow(settings?.auto_submit ?? false),
+    onSuccess: (r) => { toast(`Run now started: Discovery, Scoring, Documents, then Apply (${r.auto_submit ? "clean forms are submitted" : "review only"}). Follow it in Runs.`); setTab("runs"); qc.invalidateQueries({ queryKey: ["runs"] }); },
     onError: (e: Error) => toast(e.message),
   });
   const running = meta?.running ?? [];

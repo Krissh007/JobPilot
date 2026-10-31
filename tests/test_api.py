@@ -280,7 +280,60 @@ def test_retired_agents_cannot_be_started_and_run_now_starts_the_pipeline(client
         assert client.post(f"/api/runs/{retired}").status_code == 400
     response = client.post("/api/runs/pipeline")
     assert response.status_code == 202 and response.json()["started"] == ["discovery", "scoring", "documents", "apply"]
-    assert FakePopen.started[0][1:] == ["-m", "jobpilot.scheduled", "--now"]
+    assert FakePopen.started[0][1:] == ["-m", "jobpilot.scheduled", "--now", "--review-only"]
+
+
+def set_auto_submit_setting(client, on: bool):
+    assert client.put("/api/settings", json={"auto_submit": on}).status_code == 200
+
+
+def test_pipeline_with_no_body_is_review_only_even_when_the_setting_is_on(client, monkeypatch):  # JPA-TC-003
+    FakePopen.started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
+    set_auto_submit_setting(client, True)
+    body = client.post("/api/runs/pipeline").json()
+    assert body["auto_submit"] is False and body["mode"].startswith("Review-only")
+    assert FakePopen.started[0][1:] == ["-m", "jobpilot.scheduled", "--now", "--review-only"]
+
+
+def test_pipeline_auto_submit_request_is_review_only_when_the_setting_is_off(client, monkeypatch):  # JPA-TC-004
+    FakePopen.started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
+    set_auto_submit_setting(client, False)
+    body = client.post("/api/runs/pipeline", json={"auto_submit": True}).json()
+    assert body["auto_submit"] is False and "OFF in Settings" in body["mode"]
+    assert FakePopen.started[0][1:] == ["-m", "jobpilot.scheduled", "--now", "--review-only"]
+
+
+def test_pipeline_submits_only_when_requested_and_the_setting_is_on(client, monkeypatch):
+    FakePopen.started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
+    set_auto_submit_setting(client, True)
+    body = client.post("/api/runs/pipeline", json={"auto_submit": True}).json()
+    assert body["auto_submit"] is True and body["mode"].startswith("Auto-submit ON")
+    assert FakePopen.started[0][1:] == ["-m", "jobpilot.scheduled", "--now", "--auto-submit"]
+
+
+def test_apply_run_mode_is_in_its_log_and_its_command(client, db_url, monkeypatch):
+    FakePopen.started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
+    set_auto_submit_setting(client, True)
+
+    def finish(run_id):  # free the apply slot for the next start
+        with session_for(db_url) as s:
+            s.get(AgentRun, run_id).status = RunStatus.ok
+            s.commit()
+
+    plain = client.post("/api/runs/apply").json()                       # no body: review-only
+    assert plain["auto_submit"] is False and "--review-only" in FakePopen.started[0]
+    assert "Review-only" in client.get(f"/api/runs/{plain['id']}").json()["log"]
+    finish(plain["id"])
+    asked = client.post("/api/runs/apply", json={"auto_submit": True}).json()
+    assert asked["auto_submit"] is True and "--review-only" not in FakePopen.started[1]
+    assert "Auto-submit ON" in client.get(f"/api/runs/{asked['id']}").json()["log"]
+    finish(asked["id"])
+    vetoed = client.post("/api/runs/apply", json={"auto_submit": True, "review_only": True}).json()
+    assert vetoed["auto_submit"] is False and "--review-only" in FakePopen.started[2]
 
 
 def test_four_agents_have_distinct_names_and_modules():
