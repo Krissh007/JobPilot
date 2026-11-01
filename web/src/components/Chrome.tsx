@@ -12,7 +12,7 @@ export function Header() {
   const qc = useQueryClient();
   const search = useMutation({
     mutationFn: () => api.runNow(),
-    onSuccess: () => { toast("Run now started: Discovery, Scoring, Documents, then Apply (review only). Follow it in Runs."); setTab("runs"); qc.invalidateQueries({ queryKey: ["runs"] }); },
+    onSuccess: () => { toast("Run now started: Discovery, Scoring, Documents, then Apply (clean forms are sent; the rest wait in Review). Follow it in Runs."); setTab("runs"); qc.invalidateQueries({ queryKey: ["runs"] }); },
     onError: (e: Error) => toast(e.message),
   });
   const running = meta?.running ?? [];

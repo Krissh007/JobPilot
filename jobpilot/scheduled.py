@@ -5,7 +5,7 @@ The scheduled pass runs discovery, scoring and documents. When it runs is the `s
 repeated every N hours, or an explicit list of run times, on the chosen days of the week.
 
     python -m jobpilot.scheduled                  # one pass now, any time
-    python -m jobpilot.scheduled --now            # Run now: discovery, scoring, documents, then apply (review only)
+    python -m jobpilot.scheduled --now            # Run now: discovery, scoring, documents, then apply (submits clean forms when auto-submit is on)
     python -m jobpilot.scheduled --log            # what the task runs: logs to a file, skips late runs
     python -m jobpilot.scheduled --catch-up       # on sign-in/unlock/wake: a pass only if one is overdue
     python -m jobpilot.scheduled --print-config   # JSON used by scripts/register_tasks.ps1
@@ -127,12 +127,12 @@ def default_steps() -> list[tuple[str, Callable[[], None]]]:
 
 
 def run_now_steps() -> list[tuple[str, Callable[[], None]]]:
-    """ The four agents in order. Apply only fills forms and waits for you in Review; it never submits from here."""
+    """The four agents in order. Apply follows the auto-submit setting: clean forms are sent, anything else waits in Review."""
     from jobpilot.agents import discover, documents, shortlist
     from jobpilot.agents.apply import runner
 
     return [("discovery", discover.run), ("scoring", shortlist.run), ("documents", documents.run),
-            ("apply", lambda: runner.run(review_only=True))]
+            ("apply", runner.run)]
 
 
 def run_pipeline(steps: list[tuple[str, Callable[[], None]]] | None = None, lock: Path = LOCK) -> int:

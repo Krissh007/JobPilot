@@ -47,7 +47,7 @@ export function Runs() {
   const [live, setLive] = useState<number | null>(null);
   const [limit, setLimit] = useState(60);
   const [docsLimit, setDocsLimit] = useState(5);
-  const [reviewOnly, setReviewOnly] = useState(true);
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [log, setLog] = useState<string>("");
 

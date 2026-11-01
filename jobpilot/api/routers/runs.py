@@ -99,7 +99,7 @@ def get_run(run_id: int, request: Request, session: Session = Depends(get_sessio
 
 @router.post("/runs/pipeline", status_code=202)
 def run_now(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
-    """ Run now: Discovery, Scoring, Documents, then Apply (review only: nothing is submitted), one after another.
+    """ Run now: Discovery, Scoring, Documents, then Apply (follows the auto-submit setting: clean forms are sent, the rest wait in Review), one after another.
     Each agent records its own agent_runs row, so the Runs screen shows them as they start."""
     reap(request, session)
     busy = session.exec(select(AgentRun).where(AgentRun.agent.in_(list(RUNNABLE)), AgentRun.status == RunStatus.running,

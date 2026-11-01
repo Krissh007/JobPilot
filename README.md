@@ -81,7 +81,7 @@ unenriched jobs, freshest first, and expires the ones past the freshness window.
 ```
 
 **Run now** (dashboard header, or `python -m jobpilot.scheduled --now`) runs all four agents in order: Discovery,
-Scoring, Documents, then Apply in review-only mode. Each agent logs under its own name in the Runs screen.
+Scoring, Documents, then Apply (clean forms are submitted when auto-submit is on; anything else waits in Review). Each agent logs under its own name in the Runs screen.
 
 Searching LinkedIn or Naukri with automation may break their user agreements. Keep runs infrequent.
 
