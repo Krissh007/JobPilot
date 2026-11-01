@@ -18,6 +18,7 @@ import pytest
 from sqlmodel import Session, select
 
 from jobpilot.api import main as api_main
+from jobpilot.api.routers import runs as runs_router
 from jobpilot.api.routers import schedule as schedule_router
 from jobpilot.db.models import Actor, Job, JobStatus, StatusHistory
 from jobpilot.db.seed import seed
@@ -137,6 +138,25 @@ def test_every_screen_loads_and_a_job_can_be_moved(page, db_url):
     pg.get_by_role("button", name="Theme: light").click()
     assert pg.evaluate("document.documentElement.dataset.theme") == "dark"
 
+    assert pg.errors == []
+
+
+def test_dashboard_changes_pass_the_request_guard(page, db_url, monkeypatch):   # JPS-TC-005
+    """Run now, Approve and Save settings are all non-GET calls: the dashboard must send the header the API now requires."""
+    started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", lambda command, **kw: started.append(command))
+    pg = page
+    pg.get_by_role("button", name="Run now").click()
+    pg.get_by_text("Run now started").wait_for()
+    assert started and started[0][-1] == "--review-only"
+
+    tab(pg, "Review")
+    pg.get_by_role("button", name="Approve submit").first.click()
+    pg.get_by_text("Approved.").wait_for()
+
+    tab(pg, "Settings")
+    pg.get_by_role("button", name="Save settings").click()
+    pg.get_by_text("Settings saved").wait_for()
     assert pg.errors == []
 
 

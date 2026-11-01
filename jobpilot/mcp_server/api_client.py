@@ -31,8 +31,11 @@ def _detail_text(response: httpx.Response) -> str:
 
 class ApiClient:
     def __init__(self, base_url: str = DEFAULT_API_URL, transport: httpx.AsyncBaseTransport | None = None,
-                 timeout: float = 15.0):
-        self._http = httpx.AsyncClient(base_url=base_url.rstrip("/") + "/api", transport=transport, timeout=timeout)
+                 timeout: float = 15.0, api_token: str = ""):
+        # The bearer goes on every request (GET too). It identifies this server to JobPilot's API as an agent.
+        headers = {"Authorization": f"Bearer {api_token}"} if api_token else None
+        self._http = httpx.AsyncClient(base_url=base_url.rstrip("/") + "/api", transport=transport, timeout=timeout,
+                                       headers=headers)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         try:

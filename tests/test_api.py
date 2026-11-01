@@ -30,14 +30,14 @@ from jobpilot.db.session import get_engine
 
 @pytest.fixture
 def app(db_url):
-    application = create_app(db_url)
+    application = create_app(db_url, test_mode=True)
     application.state.sse_poll_seconds = 0.05
     return application
 
 
 @pytest.fixture
 def client(app):
-    return TestClient(app)
+    return TestClient(app, headers={"X-JobPilot-Client": "dashboard"})   # what the dashboard sends on every change
 
 
 @pytest.fixture

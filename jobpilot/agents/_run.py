@@ -6,6 +6,7 @@ dashboard can show a live "running" state and tail the log.
 
 from __future__ import annotations
 
+import os
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -48,6 +49,27 @@ class RunRecorder:
         self._last_flush = time.monotonic()
 
 
+RUN_CALLER_ENV = "JOBPILOT_RUN_CALLER"                     # set by the API for runs it starts ("dashboard" or "agent")
+RUN_REQUESTED_ENV = "JOBPILOT_RUN_AUTO_SUBMIT_REQUESTED"   # "1" / "0": what the caller asked for (pipeline runs)
+RUN_SETTING_ENV = "JOBPILOT_RUN_AUTO_SUBMIT_SETTING"       # "1" / "0": the Settings switch when the run was started
+
+
+def _flag(name: str) -> bool | None:
+    value = os.environ.get(name)
+    return None if value not in ("0", "1") else value == "1"
+
+
+def record_origin(run: AgentRun) -> None:
+    """Fill in who started this run and, for apply, what auto-submit was asked for, unless the API already did."""
+    if run.caller is None:
+        run.caller = os.environ.get(RUN_CALLER_ENV) or None
+    if run.agent == AgentName.apply:
+        if run.auto_submit_requested is None:
+            run.auto_submit_requested = _flag(RUN_REQUESTED_ENV)
+        if run.auto_submit_setting is None:
+            run.auto_submit_setting = _flag(RUN_SETTING_ENV)
+
+
 @contextmanager
 def agent_run(agent: AgentName, db_url: str | None = None, run_id: int | None = None) -> Iterator[RunRecorder]:
     """run_id: a row the API created already (POST /api/runs/{agent}), so it can stream it at once."""
@@ -55,6 +77,7 @@ def agent_run(agent: AgentName, db_url: str | None = None, run_id: int | None = 
         run = session.get(AgentRun, run_id) if run_id is not None else None
         if run is None or run.agent != agent:
             run = AgentRun(agent=agent)
+        record_origin(run)
         run.status, run.started_at = RunStatus.running, utcnow()
         session.add(run)
         session.commit()
@@ -64,6 +87,9 @@ def agent_run(agent: AgentName, db_url: str | None = None, run_id: int | None = 
     # Append to what the API already wrote, so a client tailing the log never loses a line.
     recorder.lines = existing.splitlines() if existing else []
     recorder.log(f"{agent.value} run #{run_id} started")
+    caller = os.environ.get(RUN_CALLER_ENV)
+    if agent == AgentName.apply and caller and "started by" not in (existing or ""):   # pipeline rows are made here, so the API's own line isn't there
+        recorder.log(f"started by {caller}")
     try:
         yield recorder
     except BaseException as error:  # includes Ctrl+C, so the row never stays "running"

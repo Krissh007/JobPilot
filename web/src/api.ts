@@ -97,10 +97,17 @@ export class ApiError extends Error {
   }
 }
 
+// Every call goes through here. Anything that changes state carries X-JobPilot-Client: the API refuses it without that
+// header (or an agent's token). It is a guard against other web pages, not a login.
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const safe = !init?.method || ["GET", "HEAD"].includes(init.method.toUpperCase());
   const response = await fetch(`/api${path}`, {
     ...init,
-    headers: init?.body ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(safe ? {} : { "X-JobPilot-Client": "dashboard" }),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
   });
   if (!response.ok) {
     let detail: unknown = response.statusText;

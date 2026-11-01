@@ -125,7 +125,7 @@ def resume(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(db_url):
-    return TestClient(create_app(db_url))
+    return TestClient(create_app(db_url, test_mode=True), headers={"X-JobPilot-Client": "dashboard"})
 
 
 def status_of(db_url, ident):

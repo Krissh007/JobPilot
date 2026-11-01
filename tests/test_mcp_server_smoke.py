@@ -16,6 +16,7 @@ from jobpilot.mcp_server.api_client import ApiClient
 from jobpilot.mcp_server.server import create_mcp_server
 
 pytestmark = pytest.mark.anyio
+API_TOKEN = "a" * 40   # a made-up value, only for these tests
 
 
 @pytest.fixture
@@ -65,8 +66,8 @@ async def test_every_tool_against_the_real_api(db_url, monkeypatch):
         s.commit()
         ids = [x.id for x in apps]
 
-    transport = httpx.ASGITransport(app=create_api(db_url, web_dist=None))
-    client = Client(create_mcp_server(ApiClient(transport=transport)))
+    transport = httpx.ASGITransport(app=create_api(db_url, web_dist=None, api_token=API_TOKEN))
+    client = Client(create_mcp_server(ApiClient(transport=transport, api_token=API_TOKEN)))
     async with client:
         jobs = await call(client, "get_jobs", {"status": "found"})
         assert jobs["ok"] and [j["title"] for j in jobs["data"]["jobs"]] == ["Found Only"]
@@ -88,6 +89,8 @@ async def test_every_tool_against_the_real_api(db_url, monkeypatch):
 
         started = await call(client, "run_agent", {"agent": "discovery"})
         assert started["ok"] and started["data"]["run_id"]
+        with Session(get_engine(db_url)) as s:   # the bearer made the API tag this run as started by an agent (JPS-TC-006)
+            assert s.get(AgentRun, started["data"]["run_id"]).caller == "agent"
         dupe = await call(client, "run_agent", {"agent": "discovery"})
         assert not dupe["ok"] and "already in progress" in dupe["say"]
         blocked = await call(client, "run_agent", {"agent": "apply"})           # the seeded apply run is live

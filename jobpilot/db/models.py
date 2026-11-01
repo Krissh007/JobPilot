@@ -131,6 +131,9 @@ class AgentRun(SQLModel, table=True):
     error: str = ""
     log: str = ""
     is_example: bool = False
+    caller: Optional[str] = None                  # "dashboard" or "agent"; None for CLI / Task Scheduler runs and older rows
+    auto_submit_requested: Optional[bool] = None   # apply runs: what the caller asked for
+    auto_submit_setting: Optional[bool] = None     # apply runs: the Settings switch when the run started
 
 
 class Application(SQLModel, table=True):

@@ -260,10 +260,31 @@ All scheduled tasks are per-user (interactive logon), ignore a new instance whil
 and need no admin. A lock file prevents overlapping passes; late starts outside the window (or away from an
 explicit time) skip themselves.
 
-## 6. MCP server (for JARVIS)
+## 6. API access and the MCP server (for JARVIS)
 
-`python -m jobpilot.mcp_server` serves `127.0.0.1:8766/mcp`, protected by `JOBPILOT_MCP_TOKEN`. It has no
-database access: every tool calls JobPilot's own REST API, so the API's guards apply.
+**Who may call the API** (`jobpilot/api/security.py`, the outermost middleware). Checks run in this order and the first
+failure answers:
+
+| Check | Rule | Refusal |
+|---|---|---|
+| Client address | loopback only | 403 |
+| Host | `127.0.0.1:<port>` or `localhost:<port>`, the port being the one uvicorn is bound to (read from the socket, not configured). `testserver` only when `create_app(test_mode=True)` | 403 |
+| Origin (non-GET) | if present, the app's own origin; the Vite origins only with `JOBPILOT_DEV=1` | 403 |
+| Auth (non-GET) | `Authorization: Bearer <JOBPILOT_API_TOKEN>` (compared with `hmac.compare_digest`) tags the request `agent`; else `X-JobPilot-Client: dashboard` tags it `dashboard`; neither | 403 |
+| Bad bearer | present but wrong, malformed, or token auth disabled; never falls back to the header | 401 |
+
+GET, HEAD and OPTIONS need only the Host check. The dashboard sends the header from its single fetch wrapper
+(`web/src/api.ts`). **The header is a CSRF guard, not authentication**: a browser page on another origin can't add it
+(that needs a preflight, and CORS allows no foreign origin), but any local program can. The token (32+ characters,
+`JOBPILOT_API_TOKEN`) only identifies agents; whether a run may submit is still decided by the run request plus the
+auto-submit setting (section 4.4). If the token is missing or short, token auth is off with one logged warning and the
+dashboard is unaffected. Runs record `caller`, `auto_submit_requested` and `auto_submit_setting` (nullable columns on
+`agent_runs`, migration 0006; CLI and Task Scheduler runs leave them empty). The token is never logged, returned or passed
+to agent processes.
+
+**MCP server.** `python -m jobpilot.mcp_server` serves `127.0.0.1:8766/mcp`, protected by `JOBPILOT_MCP_TOKEN`. It has
+no database access: every tool calls JobPilot's own REST API, sending `JOBPILOT_API_TOKEN` as a bearer, so the API's
+guards apply. It refuses to start without a valid `JOBPILOT_API_TOKEN`.
 
 | Tool | Kind |
 |---|---|
@@ -301,6 +322,7 @@ Flight deck palette; light/dark/system; usable at phone width).
 | Documents | fact check, date correction, titles and registered variants, short cover letters, Word limits |
 | Apply | LinkedIn and Naukri on fake pages: no submit while waiting, trusted auto-submit only, consent never ticked, parking and drafts, blocked, external, cap, relaunch; readiness verdicts |
 | API, scheduler, MCP | every route and guard; schedule days/times, late runs, catch-up; MCP tools and auth |
+| API access | bad Host, Origin, dashboard header and bearer rules over every state-changing route (the list comes from the app, with a guard that it is complete), the token never in logs, responses, run rows or agent environments, MCP bearer and start-up check |
 | Self-contained | no import of the old project |
 | UI smoke | built dashboard on a temp DB: every screen, move a job, charts, theme, no console errors, no phone overflow |
 
