@@ -14,7 +14,7 @@ from jobpilot.api.routers import schedule as schedule_router
 
 @pytest.fixture
 def client(db_url):
-    return TestClient(create_app(db_url))
+    return TestClient(create_app(db_url, test_mode=True), headers={"X-JobPilot-Client": "dashboard"})
 
 
 def test_pipeline_runs_every_step_even_after_a_failure(tmp_path, capsys):

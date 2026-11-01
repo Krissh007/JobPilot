@@ -234,11 +234,25 @@ powershell -ExecutionPolicy Bypass -File E:\JobPilot\scripts\register_tasks.ps1 
 The tasks run only while you are logged on, start a missed run when the PC is next available, never overlap (a lock file plus *ignore new instance*), stop after 2 h, and need no admin rights. Windows doesn't reliably start missed runs after sleep or modern
 standby, hence the catch-up task; a run Windows starts more than 30 min after the window closes skips itself. **Apply is never scheduled**: it opens a browser and waits for you. After changing the times in Settings, click **Update tasks**.
 
+## Who can call the API
+
+The API serves this PC only, and checks every request in this order: **Host**, then **Origin**, then **auth**.
+
+- **Host** must be `127.0.0.1:<port>` or `localhost:<port>` (the port uvicorn is bound to). Anything else gets 403, which stops a web page from reaching the API through a rebound DNS name.
+- **Origin**, on anything that changes state: if the browser sends one it must be the app's own. The Vite dev server's origin (`http://localhost:5173`) is accepted only when the API runs with `JOBPILOT_DEV=1`.
+- **Auth**, on anything that changes state (every POST, PUT, PATCH and DELETE): either the dashboard header `X-JobPilot-Client: dashboard`, which the dashboard sends on its own, or `Authorization: Bearer <JOBPILOT_API_TOKEN>`, which agents (the MCP server, JARVIS) send. The header is a guard against other web pages, **not a login**: any program on this PC can send it. A bearer that is wrong or malformed gets 401 and never falls back to the header. GET and HEAD need only the Host check.
+
+The token only says who is calling; it does not allow submitting. A run submits applications only if the run request says `auto_submit: true` **and** the Settings switch is ON. Runs record who started them (`dashboard` or `agent`), what was asked and what the setting was, in the Runs API.
+
+`JOBPILOT_API_TOKEN` (at least 32 characters) goes in `.env`; generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(48))"`. If it is missing or too short the API logs one warning, token auth is off, and the dashboard keeps working. Restart the API after changing it.
+
 ## MCP server (JARVIS via Agent Hub)
 
 ```powershell
-.\.venv\Scripts\python -m jobpilot.mcp_server      # http://127.0.0.1:8766/mcp; needs JOBPILOT_MCP_TOKEN in .env (16+ characters)
+.\.venv\Scripts\python -m jobpilot.mcp_server      # http://127.0.0.1:8766/mcp; needs JOBPILOT_MCP_TOKEN (16+ characters) and JOBPILOT_API_TOKEN (32+, the same value the API runs with) in .env
 ```
+The server refuses to start without both, and sends `JOBPILOT_API_TOKEN` as a bearer on every call to the API.
 
 Registered in Agent Hub as `jobpilot` (`E:\agent-hub\config\agents.yaml`). It has no database access; every tool
 calls the REST API above, so the same guards apply. Tools: `get_jobs`, `get_shortlist`, `get_review_queue`,

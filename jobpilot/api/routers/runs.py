@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from jobpilot.api.deps import get_or_404, get_session
+from jobpilot.api.security import TOKEN_ENV
 from jobpilot.config import ROOT
 from jobpilot.db.models import AgentName, AgentRun, RunStatus, utcnow
 from jobpilot.db.repo import get_setting
@@ -74,6 +75,24 @@ def build_command(agent: AgentName, run_id: int, options: RunOptions, auto_submi
         if options.job_id:
             command += ["--job-id", str(options.job_id)]
     return command
+
+
+def child_env(request: Request, caller: str | None = None, requested: bool | None = None,
+              setting: bool | None = None) -> dict[str, str]:
+    """The environment an agent process starts with. The API token stays out of it; the run's origin goes in."""
+    env = {k: v for k, v in os.environ.items() if k != TOKEN_ENV}
+    env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"})
+    if request.app.state.db_url:
+        env["DATABASE_URL"] = request.app.state.db_url
+    for name, value in (("JOBPILOT_RUN_CALLER", caller), ("JOBPILOT_RUN_AUTO_SUBMIT_REQUESTED", requested),
+                        ("JOBPILOT_RUN_AUTO_SUBMIT_SETTING", setting)):
+        if value is not None:
+            env[name] = value if isinstance(value, str) else str(int(value))
+    return env
+
+
+def caller_of(request: Request) -> str | None:
+    return getattr(request.state, "caller", None)
 
 
 def reap(request: Request, session: Session) -> None:
@@ -129,16 +148,15 @@ def run_now(request: Request, options: PipelineOptions = PipelineOptions(),
     if live:
         raise HTTPException(409, {"message": f"A {live[0].agent.value} run is already in progress", "run_id": live[0].id})
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
-    if request.app.state.db_url:
-        env["DATABASE_URL"] = request.app.state.db_url
+    setting_on = bool(get_setting(session, "auto_submit"))
     effective = submits(options.auto_submit, False, session)
+    env = child_env(request, caller_of(request), options.auto_submit, setting_on)
     command = [sys.executable, "-m", "jobpilot.scheduled", "--now", "--auto-submit" if effective else "--review-only"]
     with open(LOG_DIR / "run_now.log", "w", encoding="utf-8") as console:
         subprocess.Popen(command, cwd=ROOT, env=env, stdout=console, stderr=subprocess.STDOUT,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return {"started": [a.value for a in MODULES], "log": "data/logs/run_now.log", "auto_submit": effective,
-            "mode": mode_line(options.auto_submit, bool(get_setting(session, "auto_submit")), effective)}
+            "mode": mode_line(options.auto_submit, setting_on, effective)}
 
 
 @router.post("/runs/{agent}", status_code=202)
@@ -156,16 +174,19 @@ def start_run(agent: AgentName, request: Request, options: RunOptions = RunOptio
         raise HTTPException(409, {"message": f"A {agent.value} run is already in progress", "run_id": live[0].id})
 
     effective = agent == AgentName.apply and submits(options.auto_submit, options.review_only, session)
-    mode = (mode_line(options.auto_submit and not options.review_only, bool(get_setting(session, "auto_submit")), effective)
-            if agent == AgentName.apply else None)
-    run = AgentRun(agent=agent, status=RunStatus.running, log=f"Starting... {mode}" if mode else "Starting...")
+    setting_on = bool(get_setting(session, "auto_submit"))
+    requested = options.auto_submit and not options.review_only
+    mode = mode_line(requested, setting_on, effective) if agent == AgentName.apply else None
+    caller = caller_of(request)
+    run = AgentRun(agent=agent, status=RunStatus.running, caller=caller,
+                   log="Starting..." + (f" {mode} (started by {caller or 'unknown'})" if mode else ""))
+    if agent == AgentName.apply:
+        run.auto_submit_requested, run.auto_submit_setting = requested, setting_on
     session.add(run)
     session.commit()
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
-    if request.app.state.db_url:
-        env["DATABASE_URL"] = request.app.state.db_url
+    env = child_env(request)
     with open(LOG_DIR / f"run_{run.id}.log", "w", encoding="utf-8") as console:
         process = subprocess.Popen(
             build_command(agent, run.id, options, effective), cwd=ROOT, env=env, stdout=console, stderr=subprocess.STDOUT,
