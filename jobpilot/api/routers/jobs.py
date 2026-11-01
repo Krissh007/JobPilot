@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 from jobpilot.api.deps import get_or_404, get_session
 from jobpilot.db.models import Actor, Application, Job, JobStatus, StatusHistory
 from jobpilot.db.repo import find_duplicate, set_status, upsert_job
+from jobpilot.scoring.fit import FitContext, group_of, load_fit
 
 router = APIRouter(tags=["jobs"])
 
@@ -39,8 +40,13 @@ def fts_query(q: str) -> str:
     return " AND ".join(f'"{token}"*' for token in re.findall(r"\w+", q))
 
 
-def summary(job: Job) -> dict[str, Any]:
+def summary(job: Job, context: FitContext | None = None) -> dict[str, Any]:
     data = {name: getattr(job, name) for name in LIST_FIELDS}
+    if context is not None and job.status not in (JobStatus.rejected,):
+        fit = group_of(job, context)
+        data["match_group"], data["match_reason"] = fit.group, fit.reason
+    else:
+        data["match_group"], data["match_reason"] = "", ""
     data["has_docs"] = bool(job.resume_path or job.cover_letter_path)
     data["ai_tier"] = ai_tier(job.score_reason)   # "AI-core" / "AI-adjacent" / "non-AI", "" if not scored by the redesign agent
     return data
@@ -58,6 +64,7 @@ def list_jobs(
     order: Literal["asc", "desc"] = "desc",
     limit: int = Query(500, ge=1, le=2000),
     offset: int = Query(0, ge=0),
+    fit_group: Optional[Literal["best", "maybe", "eliminate", "pending", "below"]] = Query(None, alias="match"),
 ) -> dict[str, Any]:
     if sort not in SORTABLE:
         raise HTTPException(422, f"sort must be one of {sorted(SORTABLE)}")
@@ -76,11 +83,16 @@ def list_jobs(
             ids = text("SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH :m").bindparams(m=match)
             query = query.where(Job.id.in_(ids))
 
-    total = session.exec(select(func.count()).select_from(query.subquery())).one()
     column = SORTABLE[sort]
     ordered = nulls_last(column.desc() if order == "desc" else column.asc())
+    context = load_fit(session)
+    if fit_group:   # the group is computed from the job, so filter first, then page
+        everything = [j for j in session.exec(query.order_by(ordered, Job.id.desc())).all()
+                      if j.status != JobStatus.rejected and group_of(j, context).group == fit_group]
+        return {"total": len(everything), "items": [summary(j, context) for j in everything[offset:offset + limit]]}
+    total = session.exec(select(func.count()).select_from(query.subquery())).one()
     rows = session.exec(query.order_by(ordered, Job.id.desc()).offset(offset).limit(limit)).all()
-    return {"total": total, "items": [summary(job) for job in rows]}
+    return {"total": total, "items": [summary(job, context) for job in rows]}
 
 
 class JobCreate(BaseModel):

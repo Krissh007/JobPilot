@@ -259,3 +259,22 @@ Design: Phase 0 plan (approved 2026-10-06). It covers the folder structure, ERD,
 
 ## Status: all 9 phases done
 Still yours to do: answer the open questions on the Answers tab, and decide when to switch on auto-submit.
+
+
+## Plan: search criteria, then auto-apply fixes (2026-10-25)
+
+### A. Search criteria (done in code, awaiting your confirmation of the title list)
+- `discovery.strict_titles` (default on): portals are searched only for the keywords, and a card is saved only if its title contains a keyword, a registered variant or a related title (`RELATED_TITLES`). Everything else is counted as `off-title` and never saved.
+- Settings `search_queries` now holds 16 titles drawn from the resume: AI Business Analyst, AI Product Analyst, Business Analyst, Product Analyst, Associate Product Manager, Product Owner, Business Systems Analyst, Functional Analyst, Technical Business Analyst, Business Intelligence Analyst, Data Analyst, Product Analytics, AI Business Consultant, Analytics Consultant, Insights Analyst, AI Solutions Analyst.
+- Open: how to treat your AI-assisted building work (JARVIS, the job agent). It is on the resume as projects; plain Developer/Engineer titles stay excluded. Tell me if you want AI-builder roles added.
+- Open: remaining filter changes (auto-reject below threshold, experience 3-5 instead of 3-7) are not made.
+
+### B. Auto-apply fixes (starts once A is final). Evidence from the live DB, 25 Oct
+- 42 real applications: 4 submitted, 38 skipped. Skips: not_easy_apply 13, superseded 8, external 6, timeout 4, draft_saved 3, tab_closed 2, browser_closed 2.
+- Readiness: 2 of 20 clean reviews decided, so auto-submit stays OFF (verdict "NOT YET").
+- docs_ready queue: 47 LinkedIn, 93 Naukri. Last apply run was 15 Oct; Apply is never scheduled.
+1. Stop queuing jobs that cannot be applied to: skip `external` / `not_easy_apply` before opening them (LinkedIn Easy Apply filter at search, remember the verdict on the job).
+2. Parked forms: finish the 3 `draft_saved` applications and add the missing answers (5 open questions on the Answers tab).
+3. Review queue robustness: timeouts, closed tab/browser and `superseded` should not lose the filled form; resume instead of restarting.
+4. Naukri: first live auto run with chat answers from the answer bank only.
+5. Re-run readiness after 20 clean reviews; only then decide on auto-submit.

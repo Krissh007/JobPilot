@@ -37,6 +37,7 @@ from jobpilot.llm.cache import cache_get, cache_key, cache_put
 from jobpilot.llm.gemini import GeminiClient, LLMConfigError, LLMError, QuotaExhausted
 from jobpilot.resume import Resume, load_resume
 from jobpilot.experience import experience_from_jd
+from jobpilot.scoring.fit import FitConfig, classify
 from jobpilot.scoring.gates import GATE_PREFIX, GateConfig, check_gates
 
 PROMPT_VERSION = "shortlist:v2"  # v2: three AI tiers replace the ai_role yes/no
@@ -185,6 +186,18 @@ def apply_result(session: Session, job: Job, result: ShortlistScore, resume: Res
     return False
 
 
+def eliminate_after_scoring(session: Session, job: Job, gates: GateConfig, threshold: float, rec: RunRecorder) -> bool:
+    """A similar title whose description, skills or experience do not fit is dropped (rejected, with the reason)."""
+    fit = classify(job.title, job.exp_min, job.exp_max, job.score, job.score_skills, threshold,
+                   FitConfig(exp_min=gates.exp_min, exp_max=gates.exp_max, min_skills=gates.min_skills))
+    if fit.group != "eliminate" or job.status not in (JobStatus.found, JobStatus.shortlisted):
+        return False
+    job.notes = f"{job.notes}\n{GATE_PREFIX} unsuitable ({fit.reason})".strip()
+    set_status(session, job, JobStatus.rejected, actor=Actor.agent)
+    rec.log(f"      eliminated: {fit.reason}")
+    return True
+
+
 def shortlist_jobs(session: Session, rec: RunRecorder, client: JSONClient | None, resume: Resume,
                    limit: int = 20, job_id: int | None = None, dry_run: bool = False, job_ids: list[int] | None = None) -> None:
     gates = GateConfig(**(get_setting(session, "scoring") or {}))
@@ -224,6 +237,8 @@ def shortlist_jobs(session: Session, rec: RunRecorder, client: JSONClient | None
             continue
 
         shortlisted = apply_result(session, job, result, resume, threshold)
+        if gates.require_title_fit and eliminate_after_scoring(session, job, gates, threshold, rec):
+            shortlisted = False
         session.commit()
         rec.processed += 1
         rec.found += shortlisted

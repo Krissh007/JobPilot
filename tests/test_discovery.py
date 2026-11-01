@@ -47,7 +47,7 @@ class FakeSource:
 
 
 def config(**kw) -> DiscoveryConfig:
-    base = dict(keywords=["Business Analyst"], use_variants=False, locations=["Hyderabad"], sources=["linkedin"])
+    base = dict(keywords=["Business Analyst"], use_variants=False, strict_titles=False, locations=["Hyderabad"], sources=["linkedin"])
     return DiscoveryConfig(**{**base, **kw})
 
 
@@ -281,10 +281,17 @@ def test_agent_run_records_run_and_saves_found(db_url):
 
 
 def test_dry_run_opens_no_browser_and_saves_nothing(db_url):
-    discover.run({"keywords": ["Business Analyst"], "sources": ["linkedin"]}, dry_run=True, db_url=db_url)
+    discover.run({"keywords": ["Business Analyst"], "sources": ["linkedin"], "strict_titles": False}, dry_run=True, db_url=db_url)
     with Session(get_engine(db_url)) as s:
         assert s.exec(select(Job)).all() == []
         assert "AI business analyst" in s.exec(select(AgentRun)).one().log
+
+
+def test_dry_run_with_strict_titles_plans_only_the_keywords(db_url):
+    discover.run({"keywords": ["Business Analyst"], "sources": ["linkedin"]}, dry_run=True, db_url=db_url)
+    with Session(get_engine(db_url)) as s:
+        log = s.exec(select(AgentRun)).one().log
+        assert "1 queries" in log and "AI business analyst" not in log
 
 
 # ---- experience from JD, enrichment backlog ------------------------------------------
@@ -487,3 +494,31 @@ def test_prescore_ranks_core_roles_above_engineering_titles_from_broad_variants(
 def test_prescore_still_never_drops_an_off_role_card(session):
     cfg = config(use_variants=True)
     assert prescore(card("Senior Software Engineer", age=6, exp_min=10, exp_max=12), cfg, TODAY) >= 0
+
+
+# ---- strict titles ----------------------------------------------------------
+
+def test_strict_titles_searches_only_the_keywords_even_with_variants_on():
+    cfg = config(strict_titles=True, use_variants=True, keywords=["Business Analyst", "Product Analyst"])
+    assert [q.keyword for q in build_queries(cfg)] == ["Business Analyst", "Product Analyst"]
+
+
+def test_strict_titles_keeps_keyword_and_related_titles_and_drops_the_rest(session):
+    titles = ["Senior Business Analyst - Risk", "Business Systems Analyst", "Associate Product Manager", "Product Owner",
+              "Data Analyst", "Java Developer", "SAP FICO Consultant", "Data Scientist", "AI Engineer"]
+    cards = [card(t, company=f"Co{i}", url=f"https://www.linkedin.com/jobs/view/41000000{i:02d}") for i, t in enumerate(titles)]
+    src = FakeSource("linkedin", {"Business Analyst": cards})
+    report = run_discovery(session, config(strict_titles=True), {"linkedin": src}, TODAY, log=lambda m: None)
+    assert report.total("off_title") == 4
+    assert {j.title for j in session.exec(select(Job))} == set(titles[:5])
+    assert "Java Developer" not in src.enriched
+
+
+def test_strict_titles_off_keeps_every_card(session):
+    src = FakeSource("linkedin", {"Business Analyst": [card("Java Developer")]})
+    report = run_discovery(session, config(strict_titles=False), {"linkedin": src}, TODAY, log=lambda m: None)
+    assert report.total("off_title") == 0 and len(session.exec(select(Job)).all()) == 1
+
+
+def test_strict_titles_is_on_by_default():
+    assert DiscoveryConfig().strict_titles is True

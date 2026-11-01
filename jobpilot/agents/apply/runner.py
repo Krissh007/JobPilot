@@ -65,6 +65,7 @@ from jobpilot.db.session import get_engine
 from jobpilot.llm.gemini import GeminiClient
 from jobpilot.notify import notify
 from jobpilot.resume import load_resume
+from jobpilot.scoring.fit import group_of, load_fit
 
 SECURITY_MARKERS = ("checkpoint", "challenge", "captcha", "authwall", "/login", "/uas/")
 SOURCES = ("linkedin", "naukri")
@@ -141,6 +142,12 @@ def applied_today(session: Session) -> int:
     return sum(1 for value in rows if ist_date(value) == today)
 
 
+def docs_present(job: Job) -> bool:
+    """Auto-submit only sends an application whose tailored resume and cover letter exist on disk."""
+    return bool(job.resume_path and Path(job.resume_path).is_file()
+                and job.cover_letter_path and Path(job.cover_letter_path).is_file())
+
+
 MAX_RELAUNCHES = 3  # times one run reopens Chrome after it was closed under it
 
 
@@ -182,7 +189,9 @@ def select_jobs(session: Session, job_id: int | None, threshold: float) -> list[
         return [job] if job and job.id not in busy else []
     query = select(Job).where(Job.status == JobStatus.docs_ready, Job.source.in_(SOURCES), Job.is_example.is_(False),
                               Job.score >= threshold).order_by(Job.score.desc())
-    return [job for job in session.exec(query) if job.id not in busy]
+    context = load_fit(session)
+    return [job for job in session.exec(query) if job.id not in busy
+            and (not context.enabled or group_of(job, context).group == "best")]   # only best matches are queued
 
 
 def save_fields(session: Session, app: Application, records: list[Any], unknown: list[str],
@@ -360,7 +369,7 @@ def process_job(session: Session, browser: Any, job: Job, rec: RunRecorder, paci
     complete = ready and result.status == easy_apply.READY_TO_SUBMIT and not unknown and not consent
     drafted = sum(1 for r in filler.records if r.needs_review)
     trusted = complete and drafted == 0
-    eligible = job.status == JobStatus.docs_ready and (job.score or 0) >= threshold
+    eligible = job.status == JobStatus.docs_ready and (job.score or 0) >= threshold and docs_present(job)
     summary = (f"{len(filler.records)} field(s): {sum(r.source.value == 'answer_bank' for r in filler.records)} answer bank, "
                f"{sum(r.source.value == 'resume' for r in filler.records)} resume/profile, {drafted} Gemini draft(s), "
                f"{len(unknown)} empty, {len(consent)} consent box(es) left for you")
@@ -387,7 +396,7 @@ def process_job(session: Session, browser: Any, job: Job, rec: RunRecorder, paci
     reason = ("form stuck before Submit: finish it in the browser window" if not ready
               else "consent box only you can tick" if consent
               else "auto-submit is off" if not auto_submit else "Gemini drafted answers" if drafted
-              else "required fields are empty" if not complete else "job not docs_ready / below threshold")
+              else "required fields are empty" if not complete else "documents missing, or job not docs_ready / below threshold")
     app.state = ApplicationState.pending_review
     session.add(app)
     session.commit()
@@ -482,10 +491,10 @@ def process_naukri_job(session: Session, browser: Any, job: Job, rec: RunRecorde
                                  value_used="sent by Naukri when Apply is clicked", source=FieldSource.resume))
     session.commit()
 
-    eligible = job.status == JobStatus.docs_ready and (job.score or 0) >= threshold
+    eligible = job.status == JobStatus.docs_ready and (job.score or 0) >= threshold and docs_present(job)
     actor = Actor.agent
     if not (auto_submit and eligible):
-        reason = "auto-submit is off" if not auto_submit else "job not docs_ready / below threshold"
+        reason = "auto-submit is off" if not auto_submit else "documents missing, or job not docs_ready / below threshold"
         app.state = ApplicationState.pending_review
         session.add(app)
         session.commit()
@@ -553,7 +562,8 @@ def run(job_id: int | None = None, review_only: bool = False, limit: int | None 
         if job_id is not None and supersede_parked(session, job_id):
             rec.log(f"#{job_id}: the earlier saved application is replaced by this run (it picks up where LinkedIn's saved draft left off)")
         jobs = select_jobs(session, job_id, threshold)
-        rec.log(f"Auto-submit {'ON' if auto_submit else 'OFF'} · threshold {threshold:g} · today {cap - budget}/{cap} applied · "
+        mode = "ON" if auto_submit else "OFF (review-only run)" if review_only else "OFF (setting is off)"
+        rec.log(f"Auto-submit {mode} · threshold {threshold:g} · today {cap - budget}/{cap} applied · "
                 f"{len(jobs)} job(s) queued" + (f" · stop after {limit} filled form(s)" if limit else "")
                 + (" · stuck forms are parked for you" if park_incomplete else ""))
         filled = 0

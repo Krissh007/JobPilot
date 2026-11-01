@@ -36,6 +36,7 @@ from jobpilot.discovery.titles import REGISTERED_TITLES
 from jobpilot.llm.cache import cache_get, cache_key, cache_put
 from jobpilot.llm.gemini import GeminiClient, LLMConfigError, LLMError, QuotaExhausted
 from jobpilot.resume import Resume, load_resume
+from jobpilot.scoring.fit import group_of, load_fit
 from jobpilot.tailoring import checks
 
 PROMPT_VERSION = checks.PROMPT_VERSION
@@ -93,8 +94,10 @@ def select_jobs(session: Session, limit: int, job_id: int | None) -> list[Job]:
     query = (select(Job)
              .where(Job.status == JobStatus.shortlisted, Job.is_example.is_(False), func.length(Job.jd_text) >= MIN_JD_CHARS)
              .order_by(nulls_last(Job.score.desc()), Job.found_at.desc()))
+    context = load_fit(session)
     pending = [j for j in session.exec(query) if not (j.resume_path and Path(j.resume_path).is_file()
-                                                      and j.cover_letter_path and Path(j.cover_letter_path).is_file())]
+                                                      and j.cover_letter_path and Path(j.cover_letter_path).is_file())
+               and (not context.enabled or group_of(j, context).group == "best")]   # "You might like" jobs wait for you
     return pending[:limit]
 
 

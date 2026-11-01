@@ -81,7 +81,8 @@ unenriched jobs, freshest first, and expires the ones past the freshness window.
 ```
 
 **Run now** (dashboard header, or `python -m jobpilot.scheduled --now`) runs all four agents in order: Discovery,
-Scoring, Documents, then Apply in review-only mode. Each agent logs under its own name in the Runs screen.
+Scoring, Documents, then Apply in review-only mode (add `--auto-submit` to let Apply submit clean forms, and only when the
+auto-submit setting is ON too). Each agent logs under its own name in the Runs screen, including whether auto-submit was on.
 
 Searching LinkedIn or Naukri with automation may break their user agreements. Keep runs infrequent.
 
@@ -241,8 +242,8 @@ standby, hence the catch-up task; a run Windows starts more than 30 min after th
 
 Registered in Agent Hub as `jobpilot` (`E:\agent-hub\config\agents.yaml`). It has no database access; every tool
 calls the REST API above, so the same guards apply. Tools: `get_jobs`, `get_shortlist`, `get_review_queue`,
-`get_run_logs` (read) and `run_agent`, `approve_application`, `skip_application` (actions). Apply started from
-JARVIS is always review-only. Each tool returns `{ok, say, data}`, where `say` is short enough to speak.
+`get_run_logs` (read) and `run_agent`, `approve_application`, `skip_application` (actions). Apply
+started from JARVIS is review-only unless `run_agent` is called with `auto_submit: true` and the auto-submit setting is ON. Each tool returns `{ok, say, data}`, where `say` is short enough to speak.
 
 ## Tests
 

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type AgentName, type Run } from "../api";
-import { useRuns } from "../data";
+import { useRuns, useSettings } from "../data";
 import { useUI } from "../state";
 import { Button, Empty, ExampleTag, Panel, cx, duration, when } from "../ui";
 
@@ -42,6 +42,7 @@ function LiveLog({ runId, onEnd }: { runId: number; onEnd: () => void }) {
 
 export function Runs() {
   const { data: runs, isLoading } = useRuns();
+  const { data: settings } = useSettings();
   const { toast } = useUI();
   const qc = useQueryClient();
   const [live, setLive] = useState<number | null>(null);
@@ -83,7 +84,7 @@ export function Runs() {
                 {a.phase
                   ? <Button disabled title={`Arrives in ${a.phase}`}>Run now · {a.phase}</Button>
                   : <Button variant="primary" disabled={start.isPending || running(a.name)}
-                      onClick={() => start.mutate({ agent: a.name, options: a.name === "discovery" ? {} : a.name === "apply" ? { review_only: reviewOnly } : { limit: a.name === "documents" ? docsLimit : limit } })}>
+                      onClick={() => start.mutate({ agent: a.name, options: a.name === "discovery" ? {} : a.name === "apply" ? { auto_submit: !reviewOnly && (settings?.auto_submit ?? false) } : { limit: a.name === "documents" ? docsLimit : limit } })}>
                       {running(a.name) ? "Running…" : "Run now"}
                     </Button>}
               </div>

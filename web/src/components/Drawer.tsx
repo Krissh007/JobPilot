@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, STAGES, STAGE_LABEL, type JobDetail, type Stage } from "../api";
-import { useJob, useMoveJob } from "../data";
+import { useJob, useMoveJob, useSettings } from "../data";
 import { useUI } from "../state";
 import { Button, ExampleTag, StageDot, cx, expRange, inputClass, labelClass, when } from "../ui";
 
@@ -49,6 +49,7 @@ function JobPanel({ id, threshold }: { id: number; threshold: number }) {
 function JobBody({ job, threshold, onClose, toast }: { job: JobDetail; threshold: number; onClose: () => void; toast: (m: string) => void }) {
   const qc = useQueryClient();
   const move = useMoveJob();
+  const { data: settings } = useSettings();
   const [notes, setNotes] = useState(job.notes);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => setNotes(job.notes), [job.id, job.notes]);
@@ -63,7 +64,7 @@ function JobBody({ job, threshold, onClose, toast }: { job: JobDetail; threshold
     onSuccess: () => { toast(`Deleted ${job.company}: ${job.title}`); qc.invalidateQueries(); onClose(); },
   });
   const queue = useMutation({
-    mutationFn: () => api.startRun("apply", { job_id: job.id }),
+    mutationFn: () => api.startRun("apply", { job_id: job.id, auto_submit: settings?.auto_submit ?? false }),
     onSuccess: (run) => toast(`Apply run #${run.id} started for ${job.company}. Chrome opens; follow it in Runs / Review.`),
     onError: (e: Error) => toast(e.message),
   });

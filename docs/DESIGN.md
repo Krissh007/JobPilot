@@ -239,7 +239,7 @@ sequenceDiagram
 | Nothing sent without approval unless trusted auto-submit | `process_job`, `process_naukri_job`, API approve guard, `auto_submit` off by default |
 | Gemini never types into Naukri | Naukri chat answers come only from `AnswerBank.lookup` |
 | Low cap, random 20-90 s pauses, one tab | `Pacing`, `applied_today`, sequential loop |
-| Apply is never scheduled | `scheduled.default_steps` has no apply; Run now and JARVIS run it review-only |
+| Apply is never scheduled | `scheduled.default_steps` has no apply; Run now and JARVIS run it review-only unless the request says `auto_submit: true` and the setting is ON |
 
 Unknown questions become **open questions** in the answer bank (`needs-answer`); the weekly review asks you
 to answer them, which is what lets more applications become trusted over time.
@@ -252,9 +252,9 @@ to answer them, which is what lets more applications become trusted over time.
 | Scheduled task **Catch-up** | 2 min after sign-in, unlock or wake: the same pass, only if one is overdue (Windows misses runs during sleep) |
 | Scheduled task **Weekly-Answer-Review** | Monday 09:00: toast if open questions are waiting |
 | Scheduled task **JobPilot API** | at sign-in: starts the API and dashboard on :8000 (log `data\logs\api.log`) |
-| Dashboard **Run now** (`POST /api/runs/pipeline`) | all four agents in order; Apply review-only |
+| Dashboard **Run now** (`POST /api/runs/pipeline`) | all four agents in order; Apply review-only unless the body says `{"auto_submit": true}` and the setting is ON |
 | Dashboard per-agent Run now, CLI | one agent |
-| JARVIS via MCP `run_agent` | one agent or the pipeline; Apply forced review-only |
+| JARVIS via MCP `run_agent` | one agent or the pipeline; Apply review-only unless `auto_submit` is true and the setting is ON |
 
 All scheduled tasks are per-user (interactive logon), ignore a new instance while one runs, stop after 2 h,
 and need no admin. A lock file prevents overlapping passes; late starts outside the window (or away from an
@@ -268,7 +268,7 @@ database access: every tool calls JobPilot's own REST API, so the API's guards a
 | Tool | Kind |
 |---|---|
 | `get_jobs`, `get_shortlist`, `get_review_queue`, `get_run_logs` | read |
-| `run_agent` (discovery, scoring, documents, apply, pipeline) | action; apply is always review-only |
+| `run_agent` (discovery, scoring, documents, apply, pipeline) | action; apply is review-only unless `auto_submit` is true and the setting is ON |
 | `approve_application`, `skip_application` | action, same rules as the Review tab |
 
 Each tool returns `{ok, say, data}`; `say` is short enough for JARVIS to speak.

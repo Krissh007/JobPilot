@@ -88,6 +88,11 @@ def naukri_job(db_url, tmp_path, monkeypatch):
     with Session(get_engine(db_url)) as s:
         job, _ = upsert_job(s, {"title": "AI Business Analyst", "company": "Acme", "source": "naukri", "url": JOB_URL,
                                 "jd_text": "LLM requirements " * 30, "score": 82, "status": "docs_ready"})
+        resume_file, letter_file = tmp_path / "Resume.docx", tmp_path / "Cover.docx"
+        resume_file.write_bytes(b"x")
+        letter_file.write_bytes(b"x")
+        job.resume_path, job.cover_letter_path = str(resume_file), str(letter_file)   # documents are on disk
+        s.add(job)
         s.add(Answer(question="notice period", answer="30 days", tags="t"))
         put_setting(s, "review_wait_minutes", 0.1)  # a broken test fails in seconds, not 20 min
         s.commit()
@@ -130,6 +135,28 @@ def test_auto_submit_when_every_chat_answer_is_in_the_bank(db_url, naukri_job, c
     job, app, _, rec = state(db_url, naukri_job)
     assert app.state == ApplicationState.submitted and job.status == JobStatus.applied
     assert "APPLIED on Naukri (auto-submit; 1 chatbot answer(s)" in rec.log and "waiting" not in rec.log.lower()
+
+
+def test_review_only_run_never_sends_with_auto_submit_on(db_url, naukri_job, chrome):  # JPA-TC-005 (Naukri)
+    set_auto(db_url, True)
+    make, holder = factory(chrome, questions=["What is your notice period?"])
+    seen = {}
+
+    class You(FakePacing):
+        def _sleep(self, _seconds):
+            with Session(get_engine(db_url)) as s:
+                app = s.exec(select(Application).where(Application.state == ApplicationState.pending_review)).first()
+                if app and "applies" not in seen:
+                    seen["applies"] = page_value(holder, "window.__applies")  # while waiting for you
+                    app.state = ApplicationState.skipped
+                    s.add(app)
+                    s.commit()
+
+    runner.run(review_only=True, db_url=db_url, browser_factory=make, pacing=You(), drafter_factory=lambda job: None)
+    job, app, _, rec = state(db_url, naukri_job)
+    assert seen["applies"] == 0
+    assert app.state == ApplicationState.skipped and job.status == JobStatus.docs_ready
+    assert "APPLIED" not in rec.log and "Auto-submit OFF (review-only run)" in rec.log
 
 
 def hold_window_open(db_url):

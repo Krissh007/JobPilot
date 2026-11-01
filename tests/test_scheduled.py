@@ -210,7 +210,7 @@ def test_settings_api_exposes_and_validates_schedule_and_filters(client):
     body = client.get("/api/settings").json()
     assert body["schedule"]["days"] == scheduled.ALL_DAYS and body["schedule"]["times"] == []
     assert body["discovery"]["max_posted_days"] == 7 and body["discovery"]["locations"] == ["Hyderabad"]
-    assert body["scoring"] == {"exp_min": 3, "exp_max": 7, "avoid_title_words": []}
+    assert body["scoring"] == {"exp_min": 3, "exp_max": 7, "avoid_title_words": [], "require_title_fit": False, "min_skills": 60}
 
     saved = client.put("/api/settings", json={
         "schedule": {"every_hours": 4, "start": "08:00", "end": "22:00", "days": ["sat", "mon", "tue"], "times": ["18:00", "09:30"]},
@@ -220,7 +220,7 @@ def test_settings_api_exposes_and_validates_schedule_and_filters(client):
     assert saved["schedule"]["times"] == ["09:30", "18:00"]
     assert saved["discovery"]["locations"] == ["Hyderabad", "Pune"] and saved["discovery"]["max_posted_days"] == 3
     assert saved["discovery"]["enrich_per_query"] == 5 and saved["discovery"]["use_variants"] is True   # untouched keys stay
-    assert saved["scoring"] == {"exp_min": 3, "exp_max": 5, "avoid_title_words": []}
+    assert saved["scoring"] == {"exp_min": 3, "exp_max": 5, "avoid_title_words": [], "require_title_fit": False, "min_skills": 60}
 
     # a second partial patch keeps the first
     again = client.put("/api/settings", json={"discovery": {"max_posted_days": 14}}).json()
@@ -242,5 +242,35 @@ def test_settings_api_rejects_bad_values(client, payload):
     assert client.get("/api/settings").json()["schedule"]["days"] == scheduled.ALL_DAYS     # nothing was half-saved
 
 
-def test_run_now_runs_the_four_agents_in_order_with_apply_review_only():
-    assert [name for name, _ in scheduled.run_now_steps()] == ["discovery", "scoring", "documents", "apply"]
+def apply_review_only_flag(monkeypatch, steps) -> bool:
+    """Run only the apply step with runner.run replaced by a spy; returns the review_only it was called with."""
+    from jobpilot.agents.apply import runner
+    seen = []
+    monkeypatch.setattr(runner, "run", lambda **kwargs: seen.append(kwargs["review_only"]))
+    dict(steps)["apply"]()
+    return seen[0]
+
+
+def test_run_now_runs_the_four_agents_in_order_with_apply_review_only(monkeypatch):  # JPA-TC-006
+    steps = scheduled.run_now_steps()
+    assert [name for name, _ in steps] == ["discovery", "scoring", "documents", "apply"]
+    assert apply_review_only_flag(monkeypatch, steps) is True                       # review-only by default
+    assert apply_review_only_flag(monkeypatch, scheduled.run_now_steps(review_only=False)) is False
+
+
+@pytest.mark.parametrize("argv, review_only", [(["--now"], True), (["--now", "--review-only"], True),
+                                               (["--now", "--auto-submit"], False),
+                                               (["--now", "--auto-submit", "--review-only"], True)])
+def test_now_is_review_only_unless_auto_submit_is_explicit(monkeypatch, argv, review_only):
+    asked = []
+    monkeypatch.setattr(scheduled, "run_now_steps", lambda review_only=True: asked.append(review_only) or [])
+    monkeypatch.setattr(scheduled, "run_pipeline", lambda steps=None, lock=None: 0)
+    with pytest.raises(SystemExit):
+        scheduled.main(argv)
+    assert asked == [review_only]
+
+
+def test_auto_submit_flag_needs_now(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        scheduled.main(["--auto-submit"])
+    assert exit_info.value.code == 2

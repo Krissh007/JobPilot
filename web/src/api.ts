@@ -22,6 +22,7 @@ export interface JobSummary {
   exp_min: number | null; exp_max: number | null; score: number | null; score_skills: number | null;
   score_experience: number | null; score_domain: number | null; legacy_score: number | null;
   status: Stage; found_at: string; applied_at: string | null; is_example: boolean; skills: string[]; has_docs: boolean;
+  match_group: "best" | "maybe" | "eliminate" | "pending" | "below" | ""; match_reason: string;
 }
 
 export interface HistoryRow { from_status: Stage | null; to_status: Stage; changed_at: string; actor: "user" | "agent" }
@@ -50,7 +51,7 @@ export interface Run {
 export interface Answer { id: number; question: string; answer: string; tags: string; times_used: number; created_at: string; updated_at: string; is_example: boolean }
 
 export interface DiscoveryFilters {
-  keywords: string[]; use_variants: boolean; variants: string[]; locations: string[]; sources: string[];
+  keywords: string[]; use_variants: boolean; strict_titles: boolean; related_titles: string[]; variants: string[]; locations: string[]; sources: string[];
   max_posted_days: number; max_cards_per_query: number; max_pages_per_query: number; enrich_per_query: number;
   backlog_budget: number; naukri_sort_param: string;
 }
@@ -109,12 +110,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : response.json();
 }
 
-export interface JobQuery { status?: Stage[]; source?: string; min_score?: number; q?: string; include_examples?: boolean; sort?: string; order?: "asc" | "desc" }
+export interface JobQuery { match?: "best" | "maybe" | "eliminate"; status?: Stage[]; source?: string; min_score?: number; q?: string; include_examples?: boolean; sort?: string; order?: "asc" | "desc" }
 
 export function jobQueryString(q: JobQuery): string {
   const params = new URLSearchParams();
   q.status?.forEach((s) => params.append("status", s));
   if (q.source) params.set("source", q.source);
+  if (q.match) params.set("match", q.match);
   if (q.min_score != null) params.set("min_score", String(q.min_score));
   if (q.q?.trim()) params.set("q", q.q.trim());
   if (q.include_examples === false) params.set("include_examples", "false");
@@ -139,7 +141,8 @@ export const api = {
   markSubmitted: (id: number) => request<Application>(`/applications/${id}/mark-submitted`, { method: "POST" }),
   runs: (limit = 50) => request<Run[]>(`/runs?limit=${limit}`),
   run: (id: number) => request<Run>(`/runs/${id}`),
-  runNow: () => request<{ started: AgentName[]; log: string }>("/runs/pipeline", { method: "POST" }),
+  // auto_submit is the Settings switch; the server also checks it, and anything not explicitly true is review-only
+  runNow: (autoSubmit = false) => request<{ started: AgentName[]; log: string; auto_submit: boolean; mode: string }>("/runs/pipeline", { method: "POST", ...json({ auto_submit: autoSubmit }) }),
   startRun: (agent: AgentName, options: Record<string, unknown> = {}) => request<Run>(`/runs/${agent}`, { method: "POST", ...json(options) }),
   answers: () => request<Answer[]>("/answers"),
   createAnswer: (body: Pick<Answer, "question" | "answer" | "tags">) => request<Answer>("/answers", { method: "POST", ...json(body) }),
