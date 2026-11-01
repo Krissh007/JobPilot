@@ -13,6 +13,31 @@ REGISTERED_TITLES: tuple[str, ...] = (
 )
 
 
+# Titles that mean the same kind of work as the configured keywords. Under strict_titles the portals are searched only
+# for the keywords, but a card whose title contains one of these is kept too.
+RELATED_TITLES: tuple[str, ...] = (
+    "business systems analyst",
+    "business system analyst",
+    "business data analyst",
+    "technical business analyst",
+    "systems analyst",
+    "system analyst",
+    "functional analyst",
+    "bsa",
+    "business analysis",
+    "associate product manager",
+    "assistant product manager",
+    "product owner",
+    "product analytics",
+    "business analytics",
+    "business intelligence analyst",
+    "requirements analyst",
+    "product operations analyst",
+    "ai solutions analyst",
+    "ai business consultant",
+)
+
+
 def _norm(text: str) -> str:
     return " ".join("".join(c if c.isalnum() else " " for c in text.lower()).split())
 

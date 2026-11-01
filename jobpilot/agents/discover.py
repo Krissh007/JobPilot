@@ -36,7 +36,7 @@ def run(overrides: dict | None = None, dry_run: bool = False, db_url: str | None
             config = DiscoveryConfig(**{**DiscoveryConfig.from_settings(session).model_dump(), **(overrides or {})})
             queries = build_queries(config)
             rec.log(f"Discovery: {len(queries)} queries, last {config.max_posted_days} days, enrich budget "
-                    f"{config.enrich_per_query}/query, variants {'on' if config.use_variants else 'off'}")
+                    f"{config.enrich_per_query}/query, {'strict titles (keywords only)' if config.strict_titles else 'variants ' + ('on' if config.use_variants else 'off')}")
             if dry_run:
                 for q in queries:
                     rec.log(f"  {q.source} | {q.keyword} | {q.location}")
@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-pages-per-query", type=int)
     parser.add_argument("--enrich-per-query", type=int)
     parser.add_argument("--no-variants", action="store_true", help="Search only the configured keywords")
+    parser.add_argument("--loose-titles", action="store_true", help="Turn off strict titles: also search the variants and keep any title")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -96,6 +97,7 @@ def main(argv: list[str] | None = None) -> None:
         "max_posted_days": args.max_posted_days, "max_cards_per_query": args.max_cards_per_query,
         "max_pages_per_query": args.max_pages_per_query, "enrich_per_query": args.enrich_per_query,
         "use_variants": False if args.no_variants else None,
+        "strict_titles": False if args.loose_titles else None,
     }.items() if v is not None}
     try:
         run(overrides, args.dry_run, run_id=args.run_id)

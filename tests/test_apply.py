@@ -155,6 +155,11 @@ def world(db_url, tmp_path, monkeypatch):
     with Session(get_engine(db_url)) as s:
         job, _ = upsert_job(s, {"title": "AI Business Analyst", "company": "Acme", "source": "linkedin", "url": JOB_URL,
                                 "jd_text": "LLM requirements " * 30, "score": 82, "status": "docs_ready"})
+        resume_file, letter_file = tmp_path / "Resume.docx", tmp_path / "Cover.docx"
+        resume_file.write_bytes(b"x")
+        letter_file.write_bytes(b"x")
+        job.resume_path, job.cover_letter_path = str(resume_file), str(letter_file)   # documents are on disk
+        s.add(job)
         s.add(Answer(question="Notice period in days", answer="30", tags="t"))
         s.add(Answer(question="willing to relocate", answer="Yes", tags="t"))
         s.commit()
@@ -592,3 +597,18 @@ def test_max_jobs_stops_a_run_after_that_many_attempts(db_url, world, chrome):
     with Session(get_engine(db_url)) as s:
         run = s.exec(select(AgentRun).order_by(AgentRun.id.desc())).first()
         assert run.processed == 2 and "limit of 2 job(s) attempted" in run.log
+
+
+def test_auto_submit_needs_the_documents_on_disk(db_url, world, chrome):
+    set_auto(db_url, True)
+    with Session(get_engine(db_url)) as s:
+        job = s.get(Job, world)
+        job.cover_letter_path = ""     # the letter is gone: this job may not be sent unattended
+        s.add(job)
+        s.commit()
+    make, _ = factory(chrome)
+    runner.run(db_url=db_url, browser_factory=make, pacing=FakePacing(db_url, decide=ApplicationState.skipped),
+               drafter_factory=lambda job: None)
+    job, app, _, run = state(db_url, world)
+    assert app.state != ApplicationState.submitted and job.status == JobStatus.docs_ready
+    assert "AUTO-SUBMITTED" not in run.log

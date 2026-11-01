@@ -88,6 +88,11 @@ def naukri_job(db_url, tmp_path, monkeypatch):
     with Session(get_engine(db_url)) as s:
         job, _ = upsert_job(s, {"title": "AI Business Analyst", "company": "Acme", "source": "naukri", "url": JOB_URL,
                                 "jd_text": "LLM requirements " * 30, "score": 82, "status": "docs_ready"})
+        resume_file, letter_file = tmp_path / "Resume.docx", tmp_path / "Cover.docx"
+        resume_file.write_bytes(b"x")
+        letter_file.write_bytes(b"x")
+        job.resume_path, job.cover_letter_path = str(resume_file), str(letter_file)   # documents are on disk
+        s.add(job)
         s.add(Answer(question="notice period", answer="30 days", tags="t"))
         put_setting(s, "review_wait_minutes", 0.1)  # a broken test fails in seconds, not 20 min
         s.commit()

@@ -4,6 +4,8 @@ Agent 1 pipeline, per query:
     fetch cards -> freshness (card level) -> dedupe (card level) -> pre-score rank
     -> enrich only the top `enrich_per_query` -> save everything that survived as `found`.
 
+With `strict_titles` (the default) a card is dropped unless its title contains a configured keyword, a registered variant or a related title (whole words).
+Only the keywords are searched.
 Pre-score ranks; it never drops. A failing query (CAPTCHA, login wall, throttle,
 parser error) is recorded and skipped; the run goes on.
 """
@@ -22,7 +24,7 @@ from jobpilot.discovery.cards import Card, parse_experience, parse_posted
 from jobpilot.discovery.config import DiscoveryConfig
 from jobpilot.discovery.prescore import prescore
 from jobpilot.discovery.sources.base import JobSource, Query, QueryBlocked
-from jobpilot.discovery.titles import expand_keywords
+from jobpilot.discovery.titles import expand_keywords, matches_registered_title
 from jobpilot.experience import experience_from_jd
 
 
@@ -30,6 +32,7 @@ from jobpilot.experience import experience_from_jd
 class QueryResult:
     query: Query
     fetched: int = 0
+    off_title: int = 0       # cards whose title contains none of the configured keywords (strict_titles)
     stale: int = 0
     duplicate: int = 0
     enriched: int = 0
@@ -51,12 +54,13 @@ class DiscoveryReport:
 
     def summary(self) -> str:
         return (f"{len(self.results)} queries ({self.failed_queries} failed): fetched {self.total('fetched')}, "
-                f"stale {self.total('stale')}, duplicate {self.total('duplicate')}, "
+                f"off-title {self.total('off_title')}, stale {self.total('stale')}, duplicate {self.total('duplicate')}, "
                 f"enriched {self.total('enriched')}, saved {self.total('saved')} as found")
 
 
 def build_queries(config: DiscoveryConfig) -> list[Query]:
-    keywords = expand_keywords(config.keywords, config.variants if config.use_variants else [])
+    use_variants = config.use_variants and not config.strict_titles
+    keywords = expand_keywords(config.keywords, config.variants if use_variants else [])
     return [Query(source, keyword, location, config.max_posted_days)
             for source in config.sources for keyword in keywords for location in config.locations]
 
@@ -104,6 +108,9 @@ def run_discovery(
         survivors: list[Card] = []
         for card in cards:
             _prepare(card, query, today)
+            if config.strict_titles and not matches_registered_title(card.title, config.accepted_titles()):
+                result.off_title += 1
+                continue
             age = card.age_days(today)
             if age is not None and age > config.max_posted_days:   # unknown age is kept
                 result.stale += 1
@@ -136,7 +143,7 @@ def run_discovery(
             _, created = upsert_job(session, _to_job(card), actor=Actor.agent)
             result.saved += created
         session.commit()
-        log(f"[{label}] fetched {result.fetched}, stale {result.stale}, dup {result.duplicate}, "
+        log(f"[{label}] fetched {result.fetched}, off-title {result.off_title}, stale {result.stale}, dup {result.duplicate}, "
             f"enriched {result.enriched}, saved {result.saved}")
 
     return report
