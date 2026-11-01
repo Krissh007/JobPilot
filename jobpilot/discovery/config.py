@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
-from jobpilot.discovery.titles import REGISTERED_TITLES
+from jobpilot.discovery.titles import REGISTERED_TITLES, RELATED_TITLES
 
 
 class DiscoveryConfig(BaseModel):
     keywords: list[str] = Field(default_factory=lambda: ["AI Business Analyst", "AI Product Analyst", "Business Analyst", "Product Analyst"])
-    use_variants: bool = True
+    use_variants: bool = True                 # ignored while strict_titles is on
+    strict_titles: bool = True                # search only `keywords`, and keep only cards whose title contains one of them
     variants: list[str] = Field(default_factory=lambda: list(REGISTERED_TITLES))
+    related_titles: list[str] = Field(default_factory=lambda: list(RELATED_TITLES))
     locations: list[str] = Field(default_factory=lambda: ["Hyderabad"])
     sources: list[str] = Field(default_factory=lambda: ["naukri", "linkedin"])
     max_posted_days: int = Field(7, ge=1, le=60)
@@ -22,6 +24,10 @@ class DiscoveryConfig(BaseModel):
     exp_max: int = 7
     linkedin_easy_apply_only: bool = False
     naukri_sort_param: str = "sort=f"         # empty string = no sort param
+
+    def accepted_titles(self) -> list[str]:
+        """Titles a card may carry under strict_titles: the keywords, the registered variants and the related titles."""
+        return [*self.keywords, *self.variants, *self.related_titles]
 
     @field_validator("sources")
     @classmethod

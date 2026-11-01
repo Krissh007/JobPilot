@@ -336,6 +336,15 @@ def test_apply_run_mode_is_in_its_log_and_its_command(client, db_url, monkeypatc
     assert vetoed["auto_submit"] is False and "--review-only" in FakePopen.started[2]
 
 
+def test_apply_auto_submit_request_is_review_only_when_the_setting_is_off(client, monkeypatch):
+    FakePopen.started = []
+    monkeypatch.setattr(runs_router.subprocess, "Popen", FakePopen)
+    set_auto_submit_setting(client, False)
+    body = client.post("/api/runs/apply", json={"auto_submit": True}).json()
+    assert body["auto_submit"] is False and "--review-only" in FakePopen.started[0]
+    assert "OFF in Settings" in client.get(f"/api/runs/{body['id']}").json()["log"]
+
+
 def test_four_agents_have_distinct_names_and_modules():
     assert {a.value for a in runs_router.MODULES} == {"discovery", "scoring", "documents", "apply"}
     assert len(set(runs_router.MODULES.values())) == 4

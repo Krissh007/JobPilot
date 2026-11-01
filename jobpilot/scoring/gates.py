@@ -62,6 +62,8 @@ class GateConfig(BaseModel):
     exp_min: int = 3
     exp_max: int = 7
     avoid_title_words: list[str] = []   # extra off-profile words you add in Settings (scoring.avoid_title_words)
+    require_title_fit: bool = False     # reject titles that are neither your roles nor a similar one (scoring.fit)
+    min_skills: int = 60                # a similar title needs this skills sub-score to reach "You might like"
 
 
 @dataclass(frozen=True)
@@ -102,10 +104,21 @@ def role_gate(title: str, config: GateConfig | None = None) -> GateResult:
     return GateResult(True)
 
 
+def title_gate(title: str, config: GateConfig | None = None) -> GateResult:
+    if config is None or not config.require_title_fit:
+        return GateResult(True)
+    from jobpilot.scoring.fit import title_fit
+
+    if title_fit(title) == "other":
+        return GateResult(False, f"off-profile role (title): {(title or '').strip()[:60]}")
+    return GateResult(True)
+
+
 def check_gates(location: str, exp_min: int | None, exp_max: int | None, config: GateConfig | None = None,
                 title: str = "") -> GateResult:
     config = config or GateConfig()
-    for result in (india_gate(location), experience_gate(exp_min, exp_max, config), role_gate(title, config)):
+    for result in (india_gate(location), experience_gate(exp_min, exp_max, config), role_gate(title, config),
+                   title_gate(title, config)):
         if not result.passed:
             return result
     return GateResult(True)

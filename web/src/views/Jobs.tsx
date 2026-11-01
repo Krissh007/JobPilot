@@ -2,7 +2,7 @@ import { useState } from "react";
 import { STAGE_LABEL } from "../api";
 import { useJobs } from "../data";
 import { useUI } from "../state";
-import { Empty, ExampleTag, ScoreNum, SourceTag, StageDot, ago, cx, expRange } from "../ui";
+import { Empty, ExampleTag, ScoreNum, Segmented, SourceTag, StageDot, ago, cx, expRange } from "../ui";
 import { useJobQuery } from "./Board";
 
 const COLUMNS: [string, string, string][] = [
@@ -13,7 +13,8 @@ const COLUMNS: [string, string, string][] = [
 export function Jobs({ threshold }: { threshold: number }) {
   const { filters, drawer, openJob } = useUI();
   const [sort, setSort] = useState<[string, "asc" | "desc"]>(["score", "desc"]);
-  const query = useJobQuery(threshold, { status: filters.stage ? [filters.stage] : undefined, sort: sort[0], order: sort[1] });
+  const [match, setMatch] = useState<"all" | "best" | "maybe" | "eliminate">("all");
+  const query = useJobQuery(threshold, { status: filters.stage ? [filters.stage] : undefined, sort: sort[0], order: sort[1], match: match === "all" ? undefined : match });
   const { data, isLoading } = useJobs(query);
 
   if (isLoading) return <Empty title="Loading jobs…" />;
@@ -21,6 +22,16 @@ export function Jobs({ threshold }: { threshold: number }) {
 
   return (
     <>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Segmented label="Match" value={match} onChange={setMatch} options={[
+          { value: "all", label: "All" }, { value: "best", label: "Best matches" },
+          { value: "maybe", label: "You might like" }, { value: "eliminate", label: "Unsuitable" }]} />
+        <span className="text-[12px] text-muted">
+          {match === "best" ? "Your role titles, experience 2–6 yrs, scored at or above the threshold."
+            : match === "maybe" ? "Similar titles whose description, skills and experience fit. Not queued for apply; open one to decide."
+            : match === "eliminate" ? "Wrong title, experience outside 2–6 yrs, or a similar title whose skills do not fit." : ""}
+        </span>
+      </div>
       <div className="overflow-x-auto rounded-lg border border-line bg-surface">
         <table className="w-full min-w-[860px] border-collapse">
           <thead>
@@ -37,7 +48,7 @@ export function Jobs({ threshold }: { threshold: number }) {
               <tr key={job.id} onClick={() => openJob(job.id)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && openJob(job.id)}
                 className={cx("cursor-pointer border-b border-line last:border-0 hover:bg-sunk/60", drawer === job.id && "bg-accent-soft")}>
                 <td className="px-3 py-1.5"><ScoreNum score={job.score} threshold={threshold} /></td>
-                <td className="max-w-[340px] px-3 py-1.5"><div className="truncate font-semibold" title={job.title}>{job.title} {job.is_example && <ExampleTag />}</div></td>
+                <td className="max-w-[340px] px-3 py-1.5"><div className="truncate font-semibold" title={job.title}>{job.title} {job.is_example && <ExampleTag />}{job.match_group === "maybe" && <span className="ml-1.5 rounded bg-accent-soft px-1.5 text-[10.5px] font-medium text-accent" title={job.match_reason}>might like</span>}</div></td>
                 <td className="max-w-[220px] truncate px-3 py-1.5" title={job.company}>{job.company}</td>
                 <td className="max-w-[180px] truncate px-3 py-1.5 text-muted" title={job.location}>{job.location || "—"}</td>
                 <td className="num px-3 py-1.5 text-muted">{expRange(job.exp_min, job.exp_max)}</td>

@@ -51,6 +51,8 @@ class DiscoveryPatch(BaseModel):
     """Search filters for the redesign pipeline. Anything omitted keeps its current value."""
     keywords: Optional[list[str]] = None
     use_variants: Optional[bool] = None
+    strict_titles: Optional[bool] = None
+    related_titles: Optional[list[str]] = None
     variants: Optional[list[str]] = None
     locations: Optional[list[str]] = None
     sources: Optional[list[str]] = None
@@ -66,6 +68,8 @@ class ScoringPatch(BaseModel):
     exp_min: Optional[int] = Field(None, ge=0, le=40)
     exp_max: Optional[int] = Field(None, ge=0, le=40)
     avoid_title_words: Optional[list[str]] = None
+    require_title_fit: Optional[bool] = None
+    min_skills: Optional[int] = Field(None, ge=0, le=100)
 
 
 class WeeklyReview(BaseModel):
