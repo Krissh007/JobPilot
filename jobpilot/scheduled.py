@@ -33,6 +33,7 @@ from typing import Callable
 from sqlmodel import Session, select
 
 from jobpilot.config import DATA_DIR
+from jobpilot.db.migrate import ensure_current
 from jobpilot.db.repo import get_setting
 from jobpilot.db.session import session_scope
 
@@ -226,6 +227,7 @@ def main(argv: list[str] | None = None) -> None:
         print("Apply: " + ("review-only (nothing is submitted)" if review_only
                            else "auto-submit requested; it submits only if the auto_submit setting is ON"), flush=True)
         sys.exit(run_pipeline(run_now_steps(review_only)))
+    ensure_current()   # before the first agent_runs query (--now goes through agent_run, which does the same)
     if args.catch_up:
         cfg = config()
         now = datetime.now().astimezone()

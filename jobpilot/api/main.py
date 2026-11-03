@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import mimetypes
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from jobpilot.api.routers import analytics, answers, applications, data, jobs, runs, schedule, settings
 from jobpilot.api.security import DEV_ORIGINS, RequestGuard, load_api_token, usable_token
 from jobpilot.config import ROOT
+from jobpilot.db.migrate import ensure_current
 
 WEB_DIST = ROOT / "web" / "dist"
 # Windows takes MIME types from the registry, which on some PCs maps .js to text/plain;
@@ -37,7 +39,13 @@ def create_app(db_url: str | None = None, web_dist: Path | None = WEB_DIST, *, a
     """api_token: the agents' bearer token (None or under 32 characters turns token auth off). test_mode: also accept the
     "testserver" Host used by Starlette's TestClient. dev_mode: default from JOBPILOT_DEV."""
     dev = os.environ.get(DEV_ENV) == "1" if dev_mode is None else dev_mode
-    app = FastAPI(title="JobPilot", version="0.4.0")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        ensure_current(db_url)   # a release that added columns must not need a manual `alembic upgrade head`
+        yield
+
+    app = FastAPI(title="JobPilot", version="0.4.0", lifespan=lifespan)
     app.state.db_url = db_url
     app.state.processes = {}  # run_id -> Popen, for agents started from the dashboard
 

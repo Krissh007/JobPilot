@@ -308,7 +308,8 @@ def test_the_new_columns_are_additive_and_old_rows_still_load(tmp_path):
     command.upgrade(cfg, "head")
     with Session(get_engine(url)) as s:
         row = s.exec(select(AgentRun)).one()
-    assert row.log == "old" and (row.caller, row.auto_submit_requested, row.auto_submit_setting) == (None, None, None)
+    # 0007 fills the older-rows defaults; the Settings switch of that time was never recorded, so it stays unknown
+    assert row.log == "old" and (row.caller, row.auto_submit_requested, row.auto_submit_setting) == ("unknown", False, None)
 
 
 # ---- the token never leaks ----
