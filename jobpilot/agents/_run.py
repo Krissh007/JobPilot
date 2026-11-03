@@ -14,6 +14,7 @@ from typing import Iterator
 
 from sqlmodel import Session
 
+from jobpilot.db.migrate import ensure_current
 from jobpilot.db.models import AgentName, AgentRun, RunStatus, utcnow
 from jobpilot.db.session import get_engine
 
@@ -73,6 +74,7 @@ def record_origin(run: AgentRun) -> None:
 @contextmanager
 def agent_run(agent: AgentName, db_url: str | None = None, run_id: int | None = None) -> Iterator[RunRecorder]:
     """run_id: a row the API created already (POST /api/runs/{agent}), so it can stream it at once."""
+    ensure_current(db_url)   # a run started by hand or by Task Scheduler must not hit an out-of-date schema
     with Session(get_engine(db_url)) as session:
         run = session.get(AgentRun, run_id) if run_id is not None else None
         if run is None or run.agent != agent:
