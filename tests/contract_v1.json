@@ -1,0 +1,97 @@
+{
+  "contract_version": "1.0.0",
+  "tools": {
+    "approve_application": {
+      "args": [
+        "application_id",
+        "confirmed"
+      ],
+      "required": [
+        "application_id"
+      ],
+      "side_effect": true
+    },
+    "get_job_summary": {
+      "args": [],
+      "required": [],
+      "side_effect": false
+    },
+    "get_jobs": {
+      "args": [
+        "limit",
+        "min_score",
+        "query",
+        "status"
+      ],
+      "required": [],
+      "side_effect": false
+    },
+    "get_open_questions": {
+      "args": [
+        "limit",
+        "skip"
+      ],
+      "required": [],
+      "side_effect": false
+    },
+    "get_review_queue": {
+      "args": [],
+      "required": [],
+      "side_effect": false
+    },
+    "get_run_logs": {
+      "args": [
+        "agent",
+        "run_id",
+        "tail"
+      ],
+      "required": [],
+      "side_effect": false
+    },
+    "get_saved_applications": {
+      "args": [
+        "limit"
+      ],
+      "required": [],
+      "side_effect": false
+    },
+    "get_shortlist": {
+      "args": [
+        "limit"
+      ],
+      "required": [],
+      "side_effect": false
+    },
+    "run_agent": {
+      "args": [
+        "agent",
+        "auto_submit"
+      ],
+      "required": [
+        "agent"
+      ],
+      "side_effect": true
+    },
+    "save_answer": {
+      "args": [
+        "answer",
+        "confirmed",
+        "question"
+      ],
+      "required": [
+        "answer",
+        "question"
+      ],
+      "side_effect": true
+    },
+    "skip_application": {
+      "args": [
+        "application_id"
+      ],
+      "required": [
+        "application_id"
+      ],
+      "side_effect": true
+    }
+  }
+}

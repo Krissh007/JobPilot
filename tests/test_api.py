@@ -429,3 +429,10 @@ def test_job_list_carries_the_ai_tier(client, db_url):
         s.commit()
     items = {i["company"]: i for i in client.get("/api/jobs", params={"include_examples": "true", "limit": 500}).json()["items"]}
     assert items["TierCo"]["ai_tier"] == "AI-adjacent" and items["NoTier"]["ai_tier"] == ""
+
+
+def test_job_rows_include_the_url_and_can_be_sorted_by_applied_at(client, seeded):
+    body = client.get("/api/jobs", params={"sort": "applied_at", "include_examples": False}).json()
+    assert body["items"] == [] or all("url" in row and "applied_at" in row for row in body["items"])
+    everything = client.get("/api/jobs", params={"sort": "applied_at"}).json()
+    assert everything["items"] and all("url" in row for row in everything["items"])

@@ -68,15 +68,17 @@ def job(i, title, company, score=80, status="shortlisted"):
 
 # ---- listing ----
 
-async def test_exactly_the_seven_tools_with_hints():
+async def test_exactly_the_eleven_tools_and_agent_info_with_hints():
     _, client = make()
     async with client:
         tools = {t.name: t for t in (await client.list_tools()).tools}
     assert set(tools) == {"get_jobs", "get_shortlist", "get_review_queue", "get_run_logs", "run_agent",
-                          "approve_application", "skip_application"}
-    for name in ("get_jobs", "get_shortlist", "get_review_queue", "get_run_logs"):
+                          "approve_application", "skip_application", "get_job_summary", "get_saved_applications",
+                          "get_open_questions", "save_answer", "agent_info"}
+    for name in ("get_jobs", "get_shortlist", "get_review_queue", "get_run_logs", "get_job_summary",
+                 "get_saved_applications", "get_open_questions", "agent_info"):
         assert tools[name].annotations.read_only_hint is True
-    for name in ("run_agent", "approve_application", "skip_application"):
+    for name in ("run_agent", "approve_application", "skip_application", "save_answer"):
         assert tools[name].annotations.destructive_hint is True
 
 
@@ -259,12 +261,30 @@ async def test_run_agent_already_running_is_speakable():
 
 # ---- approve / skip ----
 
+CONFIRMED = {"approve_application": {"confirmed": True}, "skip_application": {}}   # approve submits, so it needs the flag
+
+
+@pytest.mark.parametrize("args", [{}, {"confirmed": False}])
+async def test_approve_without_confirmation_changes_nothing(args):
+    fake, client = make({("POST", "/api/applications/7/approve"): (200, {"id": 7, "state": "approved"})})
+    async with client:
+        r = await call(client, "approve_application", {"application_id": 7, **args})
+    assert not r["ok"] and r["say"].startswith("Needs confirmation:") and r["data"] == {"needs_confirmation": True}
+    assert fake.requests == []                                                  # the API was never called
+
+
+async def test_approve_with_confirmation_posts_once():
+    fake, client = make({("POST", "/api/applications/7/approve"): (200, {"id": 7, "state": "approved", "job": {}})})
+    async with client:
+        r = await call(client, "approve_application", {"application_id": 7, "confirmed": True})
+    assert r["ok"] and [q.url.path for q in fake.requests] == ["/api/applications/7/approve"]
+
 @pytest.mark.parametrize("tool,verb,past", [("approve_application", "approve", "Approved"), ("skip_application", "skip", "Skipped")])
 async def test_decide_posts_to_the_matching_endpoint(tool, verb, past):
     done = {"id": 7, "state": "approved" if verb == "approve" else "skipped", "job": {"title": "ML Engineer", "company": "Acme"}}
     fake, client = make({("POST", f"/api/applications/7/{verb}"): (200, done)})
     async with client:
-        r = await call(client, tool, {"application_id": 7})
+        r = await call(client, tool, {"application_id": 7, **CONFIRMED[tool]})
     assert fake.last.method == "POST" and fake.last.url.path == f"/api/applications/7/{verb}"
     assert r["ok"] and r["say"] == f"{past} application 7, ML Engineer at Acme." and r["data"]["state"] == done["state"]
 
@@ -274,7 +294,7 @@ async def test_decide_passes_conflict_text_through(tool, verb):
     text = "Application 7 is 'submitted', not waiting for review"
     _, client = make({("POST", f"/api/applications/7/{verb}"): (409, {"detail": text})})
     async with client:
-        r = await call(client, tool, {"application_id": 7})
+        r = await call(client, tool, {"application_id": 7, **CONFIRMED[tool]})
     assert not r["ok"] and r["say"] == text
 
 
@@ -283,8 +303,8 @@ async def test_decide_rejects_bad_ids_and_missing_applications(tool):
     fake, client = make({("POST", "/api/applications/99/approve"): (404, {"detail": "Application 99 not found"}),
                          ("POST", "/api/applications/99/skip"): (404, {"detail": "Application 99 not found"})})
     async with client:
-        zero = await call(client, tool, {"application_id": 0})
-        gone = await call(client, tool, {"application_id": 99})
+        zero = await call(client, tool, {"application_id": 0, **CONFIRMED[tool]})
+        gone = await call(client, tool, {"application_id": 99, **CONFIRMED[tool]})
     assert not zero["ok"] and len(fake.requests) == 1
     assert not gone["ok"] and "99" in gone["say"]
 

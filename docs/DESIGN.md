@@ -73,7 +73,7 @@ flowchart LR
 | Documents | `jobpilot/agents/documents.py`, `jobpilot/tailoring/` | truth-first prompt, fact check, date/title checks, ATS `.docx` writer |
 | Apply | `jobpilot/agents/apply/` | runner, LinkedIn filler (`easy_apply.py` + `filler.py`), Naukri (`naukri_applier.py` + `naukri.py`), answer bank, sign-in helper, readiness report |
 | API | `jobpilot/api/` | data, jobs, applications, runs (+SSE, Run now), answers, settings, schedule, analytics; serves `web/dist` at `/` |
-| MCP | `jobpilot/mcp_server/` | 7 tools for JARVIS over the REST API, bearer token |
+| MCP | `jobpilot/mcp_server/` | 11 tools plus `agent_info` (contract 1.0.0) for agents over the REST API, bearer token |
 | Scheduling | `jobpilot/scheduled.py`, `jobpilot/weekly.py`, `scripts/register_tasks.ps1` | three per-user Task Scheduler tasks |
 | Dashboard | `web/src/` | Board, Jobs, Review, Runs, Answers, Analytics, Database, Settings; job drawer |
 
@@ -290,9 +290,13 @@ guards apply. It refuses to start without a valid `JOBPILOT_API_TOKEN`.
 |---|---|
 | `get_jobs`, `get_shortlist`, `get_review_queue`, `get_run_logs` | read |
 | `run_agent` (discovery, scoring, documents, apply, pipeline) | action; apply is review-only unless `auto_submit` is true and the setting is ON |
-| `approve_application`, `skip_application` | action, same rules as the Review tab |
+| `approve_application`, `skip_application` | action, same rules as the Review tab; approve also needs `confirmed: true` |
+| `get_job_summary`, `get_saved_applications`, `get_open_questions` | read |
+| `save_answer` | action: saves a screening answer the user said; needs `confirmed: true` |
+| `agent_info` | read: name, contract version and tools, for the hub's compatibility check |
 
-Each tool returns `{ok, say, data}`; `say` is short enough for JARVIS to speak.
+Each tool returns `{ok, say, data, contract_version}`; `say` is short enough to speak. A write that is not confirmed
+returns `ok: false`, `say` starting "Needs confirmation", and changes nothing.
 
 ## 7. Dashboard
 

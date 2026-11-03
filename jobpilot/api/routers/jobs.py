@@ -21,9 +21,11 @@ from jobpilot.scoring.fit import FitContext, group_of, load_fit
 router = APIRouter(tags=["jobs"])
 
 SORTABLE = {"score": Job.score, "found_at": Job.found_at, "title": Job.title, "company": Job.company,
-            "location": Job.location, "source": Job.source, "status": Job.status, "legacy_score": Job.legacy_score}
+            "location": Job.location, "source": Job.source, "status": Job.status, "legacy_score": Job.legacy_score,
+            "applied_at": Job.applied_at}
 LIST_FIELDS = ("id", "title", "company", "source", "location", "exp_min", "exp_max", "score", "score_skills",
-               "score_experience", "score_domain", "legacy_score", "status", "found_at", "applied_at", "is_example", "skills")
+               "score_experience", "score_domain", "legacy_score", "status", "url", "found_at", "applied_at", "is_example",
+               "skills")
 
 
 TIER_TAG = "[Tier: "  # written at the end of score_reason by jobpilot.agents.shortlist

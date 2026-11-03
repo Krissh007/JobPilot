@@ -12,6 +12,7 @@ Who may call it (Host check, dashboard header or bearer token): see jobpilot/api
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 from contextlib import asynccontextmanager
@@ -25,6 +26,7 @@ from jobpilot.api.routers import analytics, answers, applications, data, jobs, r
 from jobpilot.api.security import DEV_ORIGINS, RequestGuard, load_api_token, usable_token
 from jobpilot.config import ROOT
 from jobpilot.db.migrate import ensure_current
+from jobpilot.db.stuck_runs import fail_stuck_runs
 
 WEB_DIST = ROOT / "web" / "dist"
 # Windows takes MIME types from the registry, which on some PCs maps .js to text/plain;
@@ -43,6 +45,10 @@ def create_app(db_url: str | None = None, web_dist: Path | None = WEB_DIST, *, a
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         ensure_current(db_url)   # a release that added columns must not need a manual `alembic upgrade head`
+        try:
+            fail_stuck_runs(db_url)   # a run killed without a trace must not say "running" for ever
+        except Exception:   # noqa: BLE001 - housekeeping must never stop the API from starting
+            logging.getLogger("jobpilot.api").exception("could not check for stuck runs")
         yield
 
     app = FastAPI(title="JobPilot", version="0.4.0", lifespan=lifespan)
