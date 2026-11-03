@@ -52,5 +52,8 @@ class ApiClient:
     async def post(self, path: str, json: Any = None) -> Any:
         return await self._request("POST", path, json=json)
 
+    async def put(self, path: str, json: Any = None) -> Any:
+        return await self._request("PUT", path, json=json)
+
     async def aclose(self) -> None:
         await self._http.aclose()

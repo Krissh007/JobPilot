@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 from mcp.client.client import Client
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from jobpilot.api.main import create_app as create_api
 from jobpilot.api.routers import runs as runs_router
@@ -79,7 +79,10 @@ async def test_every_tool_against_the_real_api(db_url, monkeypatch):
         queue = await call(client, "get_review_queue")
         assert queue["data"]["count"] == 3 and "ML Engineer at Co2" in queue["say"] and all(f"application {a['application_id']}," in queue["say"] for a in queue["data"]["applications"])
 
-        approved = await call(client, "approve_application", {"application_id": ids[0]})
+        unconfirmed = await call(client, "approve_application", {"application_id": ids[0]})
+        assert not unconfirmed["ok"] and unconfirmed["data"] == {"needs_confirmation": True}
+        assert (await call(client, "get_review_queue"))["data"]["count"] == 3          # still waiting
+        approved = await call(client, "approve_application", {"application_id": ids[0], "confirmed": True})
         assert approved["ok"] and approved["data"]["state"] == "approved"
         skipped = await call(client, "skip_application", {"application_id": ids[1]})
         assert skipped["ok"] and skipped["data"]["state"] == "skipped"
@@ -101,3 +104,55 @@ async def test_every_tool_against_the_real_api(db_url, monkeypatch):
         assert logs["ok"] and logs["data"]["runs"][0]["agent"] == "discovery"
         one = await call(client, "get_run_logs", {"run_id": started["data"]["run_id"], "tail": 3})
         assert one["ok"] and one["data"]["run"]["id"] == started["data"]["run_id"]
+
+
+async def test_new_tools_against_the_real_api(db_url):
+    from jobpilot.db.models import Answer, ApplicationField, FieldSource
+
+    with Session(get_engine(db_url)) as s:
+        add_job(s, 1, "Found Only", JobStatus.found, 40)
+        a = add_job(s, 2, "ML Engineer", JobStatus.shortlisted, 90)
+        demo = add_job(s, 3, "Demo Job", JobStatus.found, 50)
+        demo.is_example = True
+        draft = Application(job_id=a.id, state=ApplicationState.pending_review, reason="draft_saved")
+        s.add_all([demo, draft, Answer(question="Visa status?", answer=""), Answer(question="Expected salary?", answer="12 LPA")])
+        s.commit()
+        s.add_all([ApplicationField(application_id=draft.id, field_name="Notice period?", value_used="(empty: needs you)",
+                                    source=FieldSource.llm, needs_review=True),
+                   ApplicationField(application_id=draft.id, field_name="Expected salary?", value_used="(empty: needs you)",
+                                    source=FieldSource.llm),
+                   ApplicationField(application_id=draft.id, field_name="I agree", value_used="(not ticked: only you can agree to this)",
+                                    source=FieldSource.resume)])
+        s.commit()
+
+    transport = httpx.ASGITransport(app=create_api(db_url, web_dist=None, api_token=API_TOKEN))
+    client = Client(create_mcp_server(ApiClient(transport=transport, api_token=API_TOKEN)))
+    async with client:
+        summary = await call(client, "get_job_summary")
+        assert summary["ok"] and summary["contract_version"] == "1.0.0"
+        assert summary["data"]["counts"]["found"] == 1 and summary["data"]["counts"]["shortlisted"] == 1   # demo row left out
+        assert summary["data"]["open_questions"] == 1 and summary["data"]["last_search"]["status"] is None
+
+        saved = await call(client, "get_saved_applications")
+        assert saved["data"]["applications"][0]["blanks"] == ["Notice period?", "Expected salary?"]
+        assert saved["data"]["applications"][0]["consent_boxes"] == 1 and saved["data"]["applications"][0]["title"] == "ML Engineer"
+
+        questions = await call(client, "get_open_questions", {"limit": 5})
+        assert [(q["question"], q["source"]) for q in questions["data"]["questions"]] == [
+            ("Notice period?", "application"), ("Visa status?", "answer_bank")]          # salary is answered in the bank
+
+        refused = await call(client, "save_answer", {"question": "Notice period?", "answer": "30 days"})
+        assert not refused["ok"] and refused["data"] == {"needs_confirmation": True}
+        with Session(get_engine(db_url)) as s:
+            assert s.exec(select(Answer).where(Answer.question == "Notice period?")).first() is None
+        created = await call(client, "save_answer", {"question": "Notice period?", "answer": "30 days", "confirmed": True})
+        assert created["data"]["action"] == "created"
+        filled = await call(client, "save_answer", {"question": "visa status", "answer": "Not needed", "confirmed": True})
+        assert filled["data"]["action"] == "updated"
+        again = await call(client, "save_answer", {"question": "visa status", "answer": "Not needed", "confirmed": True})
+        assert again["data"]["action"] == "unchanged"
+        with Session(get_engine(db_url)) as s:
+            rows = {r.question: r for r in s.exec(select(Answer))}
+        assert rows["Notice period?"].answer == "30 days" and rows["Notice period?"].tags == "voice"
+        assert rows["Visa status?"].answer == "Not needed" and "needs-answer" not in rows["Visa status?"].tags
+        assert (await call(client, "get_open_questions"))["data"]["total"] == 0

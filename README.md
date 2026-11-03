@@ -254,15 +254,25 @@ The token only says who is calling; it does not allow submitting. A run submits 
 ```
 The server refuses to start without both, and sends `JOBPILOT_API_TOKEN` as a bearer on every call to the API.
 
-Registered in Agent Hub as `jobpilot` (`E:\agent-hub\config\agents.yaml`). It has no database access; every tool
-calls the REST API above, so the same guards apply. Tools: `get_jobs`, `get_shortlist`, `get_review_queue`,
-`get_run_logs` (read) and `run_agent`, `approve_application`, `skip_application` (actions). Apply
-started from JARVIS is review-only unless `run_agent` is called with `auto_submit: true` and the auto-submit setting is ON. Each tool returns `{ok, say, data}`, where `say` is short enough to speak.
+An agent hub registers this server by its URL and token only; JobPilot does not know where the hub lives. It has no database access; every tool
+calls the REST API above, so the same guards apply. Tools:
+- read: `get_jobs`, `get_shortlist`, `get_review_queue`, `get_run_logs`, `get_job_summary`, `get_saved_applications`, `get_open_questions`
+- actions: `run_agent`, `approve_application`, `skip_application`, `save_answer`
+
+Apply started from an agent is review-only unless `run_agent` is called with `auto_submit: true` and the auto-submit setting is ON.
+`approve_application` and `save_answer` do nothing unless the call says `confirmed: true`, and an agent should send that only after
+the user has said yes; without it the reply is `Needs confirmation` and nothing is changed.
+
+**Contract 1.0.0.** Every reply is `{ok, say, data, contract_version}`, where `say` is short enough to speak. The `agent_info` tool returns
+the server's name, contract version and tools (with `side_effect` and `idempotent` flags) so a hub can tell whether it still
+speaks a version it knows. `CONTRACT_VERSION` is in `jobpilot/mcp_server/tools.py`; bump the major when a tool is renamed or its
+arguments or meaning change. `tests/contract_v1.json` lists the tools and arguments of the current version, and
+`tests/test_mcp_contract.py` fails when a tool no longer matches it, so a rename cannot slip through without a version bump.
 
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python -m pytest            # 225 tests
+.\.venv\Scripts\python -m pytest            # 496 tests
 .\.venv\Scripts\python -m pytest tests\test_ui_smoke.py   # dashboard end to end (needs `npm run build` first)
 ```
 
